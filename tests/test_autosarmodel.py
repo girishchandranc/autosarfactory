@@ -175,20 +175,20 @@ def test_model_create_entity():
     csInterafce = next((x for x in pack.get_elements() if x.name == 'csif'), None)
     assert (csInterafce is not None), 'csInterafce should not be None'
     assert (isinstance(csInterafce, autosarmodeller.ClientServerInterface)), 'should be an instance of ClientServerInterface'
-    assert(csInterafce.path, '/Interfaces/csif'), 'path should be /Interfaces/csif'
+    assert(csInterafce.path == '/Interfaces/csif'), 'path should be /Interfaces/csif'
 
     assert (len(csInterafce.get_operations()) == 1), '1 operation expected'
     operation = next(iter(csInterafce.get_operations()))
     assert (isinstance(operation, autosarmodeller.ClientServerOperation)), 'should be an instance of ClientServerOperation'
-    assert(operation.name, 'op1'), 'name should be op1'
-    assert(operation.path, '/Interfaces/csif/op1'), 'path should be /Interfaces/csif/op1'
+    assert(operation.name == 'op1'), 'name should be op1'
+    assert(operation.path == '/Interfaces/csif/op1'), 'path should be /Interfaces/csif/op1'
 
     assert (len(operation.get_arguments()) == 1), '1 argument expected'
     argument = next(iter(operation.get_arguments()))
     assert (isinstance(argument, autosarmodeller.ArgumentDataPrototype)), 'should be an instance of ArgumentDataPrototype'
-    assert(argument.name, 'arg1'), 'name should be arg1'
+    assert(argument.name == 'arg1'), 'name should be arg1'
     assert(isinstance(argument.get_type(), autosarmodeller.ImplementationDataType)), 'type should be ImplementationDataType'
-    assert(argument.get_type().path, '/DataTypes/ImplTypes/uint8'), 'path of type should be /DataTypes/ImplTypes/uint8'
+    assert(argument.get_type().path == '/DataTypes/ImplTypes/uint8'), 'path of type should be /DataTypes/ImplTypes/uint8'
 
     teardown()
 
