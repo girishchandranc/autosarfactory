@@ -7,9 +7,9 @@ AutosarModeller provides nice methods to read/create/modify AUTOSAR compliant ar
 - Manually install the package.
     
     $ python setup.py install
-> use python3 if you have both python2 and python3 installed.
+> use `python3` if you have both `python2` and `python3` installed.
 
-- Import the package autosarmodeller to your python file.
+- Import the package `autosarmodeller` to your python script.
 - And, finally have fun with modelling AUTOSAR.
 
 ### Reading file
