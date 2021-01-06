@@ -46,7 +46,7 @@ def test_model_create_new_file():
     packageName = 'myPack_12345'
     filePath = os.path.join(resourcesDir, 'newFile.arxml')
 
-    arPackage = autosarmodeller.create_new_file(filePath,overWrite=True,defaultArPackage=packageName)
+    arPackage = autosarmodeller.new_file(filePath,overWrite=True,defaultArPackage=packageName)
     assert (arPackage is not None), 'ArPackage should not be None'
     assert (arPackage.name == packageName), 'ArPackage should be '+ packageName
     assert (os.path.isfile(filePath)), 'File should exist'
@@ -166,9 +166,9 @@ def test_model_create_entity():
     pack = autosarmodeller.get_node('/Interfaces')
     assert (isinstance(pack, autosarmodeller.ARPackage)), 'should be instance of ARPackage'
 
-    csif = pack.create_ClientServerInterface('csif')
-    op1 = csif.create_Operation('op1')
-    arg1 = op1.create_Argument('arg1')
+    csif = pack.new_ClientServerInterface('csif')
+    op1 = csif.new_Operation('op1')
+    arg1 = op1.new_Argument('arg1')
     arg1.set_type(autosarmodeller.get_node('/DataTypes/ImplTypes/uint8'))
 
     assert (len(pack.get_elements()) == 2), '2 elements expected'
@@ -274,10 +274,10 @@ def test_model_exception_when_create_new_file():
     Test if an exception is raised when the file exists during new file creation
     """
     newFile = os.path.join(resourcesDir, 'newFile.arxml')
-    autosarmodeller.create_new_file(newFile, overWrite=True)
+    autosarmodeller.new_file(newFile, overWrite=True)
 
     with pytest.raises(FileExistsError) as cm:
-        autosarmodeller.create_new_file(newFile)
+        autosarmodeller.new_file(newFile)
         assert ('File {} already exists. If it needs overwriting, then please set True for argument overWrite.'.format(newFile) == str(cm.exception)) 
     
     teardown()
@@ -290,7 +290,7 @@ def test_model_exception_when_no_short_name_for_referrable_types():
     asw1 = autosarmodeller.get_node('/Swcs/asw1')
 
     with pytest.raises(autosarmodeller.NoShortNameException) as cm:
-        asw1.create_PPortPrototype()
+        asw1.new_PPortPrototype()
         assert ('name should not be None for Referrable objects' == str(cm.exception)) 
     
     teardown()
@@ -302,11 +302,11 @@ def test_model_exception_when_invalid_child_or_ref_added():
     """
     autosarmodeller.read(input_files)
     asw1 = autosarmodeller.get_node('/Swcs/asw1')
-    asw1.create_PPortPrototype('p1')
+    asw1.new_PPortPrototype('p1')
 
     #duplicate child addition
     with pytest.raises(autosarmodeller.InvalidRefOrChildNodeException) as cm:
-        asw1.create_PPortPrototype('p1')
+        asw1.new_PPortPrototype('p1')
         assert ('Operation not possible. A node with name {} already present in {}.'.format('p1', asw1) == str(cm.exception)) 
     
     srIf = autosarmodeller.SenderReceiverInterface()
