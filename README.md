@@ -2,8 +2,15 @@
 # Autosar Modelling Tool
 AutosarModeller provides nice methods to read/create/modify AUTOSAR compliant arxml files.
 
-## Using the package
-Simply clone the repo and import the package autosarmodeller to your python file and have fun with modelling AUTOSAR.
+## How to use
+- Clone the repository.
+- Manually install the package.
+    
+    $ python setup.py install
+> use python3 if you have both python2 and python3 installed.
+
+- Import the package autosarmodeller to your python file.
+- And, finally have fun with modelling AUTOSAR.
 
 ### Reading file
 ```python

@@ -18,8 +18,9 @@ setup(
     author='Girish Chandran',
     author_email='girishchandran.tpm@gmail.com',
     url='https://github.com/girishchandranc/autosarmodeller',
-    license=license,
+    license="MIT",
     packages=find_packages(exclude=('tests')),
     include_package_data=True,
-    python_requires='>=3.6',
+    install_requires=["lxml>=4.6.1"],
+    python_requires='>=3.7',
 )
