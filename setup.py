@@ -22,5 +22,5 @@ setup(
     packages=find_packages(exclude=('tests')),
     include_package_data=True,
     install_requires=["lxml>=4.6.1"],
-    python_requires='>=3.7',
+    python_requires='>=3.6',
 )
