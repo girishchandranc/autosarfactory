@@ -14,7 +14,7 @@ The read method processes the input files and return the root node(with merged i
 
 ### Creating new file
 ```python
-newPack = autosarmodeller.create_new_file('newFile.arxml', defaultArPackage = 'NewPack')
+newPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'NewPack')
 ```
 Creates a new arxml file with the given package name and returns the ARPackage object.
 - If package name is not provided, default package name 'RootPackage' is used. 
@@ -29,17 +29,17 @@ All the elements have `set_<attribute/reference>`methods to modify the attribute
 > For multi-references, there also exists methods `add_<reference>`, `remove_<reference>`
 
 ### Adding new model elements
-All the parent classes have `create_<element>` methods to create an element.
+All the parent classes have `new_<element>` methods to create an element.
 ```python
-rootPack = autosarmodeller.create_new_file('newFile.arxml', defaultArPackage = 'RootPack')
-newPack = rootPack.create_ARPackage('NewPack')
+rootPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'RootPack')
+newPack = rootPack.new_ARPackage('NewPack')
 #new applicaton component
-asw1 = newPack.create_ApplicationSwComponentType('asw1')
-asw1.create_PPortPrototype('outPort')
+asw1 = newPack.new_ApplicationSwComponentType('asw1')
+asw1.new_PPortPrototype('outPort')
 
 #new senderRecever interface
-srIf = newPack.create_SenderReceiverInterface('srif1')
-srIf.create_DataElement('de1')
+srIf = newPack.new_SenderReceiverInterface('srif1')
+srIf.new_DataElement('de1')
 ```
 ### Accessing elements by path
 Once the file is read by the tool, its possible to access elements by path.
@@ -57,16 +57,16 @@ The tool provides `save` method to save the changes made to the model.
 files = ['component.arxml', 'datatypes.arxml']
 autosarmodeller.read(files)
 
-rootPack = autosarmodeller.create_new_file('newFile.arxml', defaultArPackage = 'RootPack')
-newPack = rootPack.create_ARPackage('NewPack')
+rootPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'RootPack')
+newPack = rootPack.new_ARPackage('NewPack')
 
 #new applicaton component
-newcomp = newPack.create_ApplicationSwComponentType('newcomponent')
-newcomp.create_PPortPrototype('outPort')
+newcomp = newPack.new_ApplicationSwComponentType('newcomponent')
+newcomp.new_PPortPrototype('outPort')
 
 #new senderRecever interface
-srIf = newPack.create_SenderReceiverInterface('srif1')
-srIf.create_DataElement('de1')
+srIf = newPack.new_SenderReceiverInterface('srif1')
+srIf.new_DataElement('de1')
 
 #save changes
 autosarmodeller.save(['newFile.arxml'])
@@ -79,16 +79,16 @@ The tool provides `saveAs` method to save the changes made to the model into a s
 files = ['component.arxml', 'datatypes.arxml']
 autosarmodeller.read(files)
 
-rootPack = autosarmodeller.create_new_file('newFile.arxml', defaultArPackage = 'RootPack')
-newPack = rootPack.create_ARPackage('NewPack')
+rootPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'RootPack')
+newPack = rootPack.new_ARPackage('NewPack')
 
 #new applicaton component
-newcomp = newPack.create_ApplicationSwComponentType('newcomponent')
-newcomp.create_PPortPrototype('outPort')
+newcomp = newPack.new_ApplicationSwComponentType('newcomponent')
+newcomp.new_PPortPrototype('outPort')
 
 #new senderRecever interface
-srIf = newPack.create_SenderReceiverInterface('srif1')
-srIf.create_DataElement('de1')
+srIf = newPack.new_SenderReceiverInterface('srif1')
+srIf.new_DataElement('de1')
 
 #save changes
 autosarmodeller.saveAs('mergedFile.arxml')
