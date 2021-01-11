@@ -3,3 +3,6 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.0]() - 2021-01-05
 First release of the AutosarModeller. Please refer README for more information.
+
+## [0.1.1]() - 2021-01-11
+Provision to get the objects which refer a particular object.

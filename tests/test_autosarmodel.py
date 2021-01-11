@@ -324,3 +324,79 @@ def test_model_exception_when_invalid_child_or_ref_added():
         assert ('Operation not possible. {} should be an instance of RunnableEntity or its sub-classes'.format(srIf) == str(cm.exception)) 
 
     teardown()
+
+def test_model_referenced_by_elements():
+    """
+    Tests if the model elements return the actual nodes which refer a particular node
+    """
+    autosarmodeller.read(input_files)
+    srIf = autosarmodeller.get_node('/Interfaces/srif1')
+    assert (len(srIf.referenced_by) == 2), 'should be referenced by 2 elements'
+    
+    for ref_by in srIf.referenced_by:
+        if isinstance(ref_by, autosarmodeller.PPortPrototype):
+            assert (ref_by.name == 'outPort'), 'name should be outPort'
+            assert (ref_by.get_providedInterface() == srIf), 'interfaces should be same'
+        elif isinstance(ref_by, autosarmodeller.RPortPrototype):
+            assert (ref_by.name == 'inPort'), 'name should be inPort'
+            assert (ref_by.get_requiredInterface() == srIf), 'interfaces should be same'
+
+    swc = autosarmodeller.get_node('/Swcs/asw1')
+    port = swc.new_PRPortPrototype('p1')
+    port.set_providedRequiredInterface(srIf)
+    assert (len(srIf.referenced_by) == 3), 'should be referenced by 3 elements'
+    
+    for ref_by in srIf.referenced_by:
+        if isinstance(ref_by, autosarmodeller.PPortPrototype):
+            assert (ref_by.name == 'outPort'), 'name should be outPort'
+            assert (ref_by.get_providedInterface() == srIf), 'interfaces should be same'
+        elif isinstance(ref_by, autosarmodeller.RPortPrototype):
+            assert (ref_by.name == 'inPort'), 'name should be inPort'
+            assert (ref_by.get_requiredInterface() == srIf), 'interfaces should be same'
+        elif isinstance(ref_by, autosarmodeller.PRPortPrototype):
+            assert (ref_by ==  port), 'nodes should be same'
+            assert (ref_by.name == 'p1'), 'name should be p1'
+            assert (ref_by.get_providedRequiredInterface() == srIf), 'interfaces should be same'
+    
+    csIf = srIf.get_parent().new_ClientServerInterface('csIf')
+    port.set_providedRequiredInterface(csIf)
+
+    assert (len(srIf.referenced_by) == 2), 'should be referenced by 2 elements'
+    for ref_by in srIf.referenced_by:
+        if isinstance(ref_by, autosarmodeller.PPortPrototype):
+            assert (ref_by.name == 'outPort'), 'name should be outPort'
+            assert (ref_by.get_providedInterface() == srIf), 'interfaces should be same'
+        elif isinstance(ref_by, autosarmodeller.RPortPrototype):
+            assert (ref_by.name == 'inPort'), 'name should be inPort'
+            assert (ref_by.get_requiredInterface() == srIf), 'interfaces should be same'    
+
+    assert (len(csIf.referenced_by) == 1), 'should be referenced by 1 element'
+    ref_by = next(iter(csIf.referenced_by))
+    assert (isinstance(ref_by, autosarmodeller.PRPortPrototype)), 'should be instance of PRPortPrototype'
+    assert (ref_by ==  port), 'nodes should be same'
+    assert (ref_by.name == 'p1'), 'name should be p1'
+    assert (ref_by.get_providedRequiredInterface() == csIf), 'interfaces should be same'
+
+    mergedArxml = os.path.join(resourcesDir, 'merged.arxml')
+    autosarmodeller.saveAs(mergedArxml,overWrite=True)
+    teardown()
+
+    # again read the file and check if the values and references exist
+    autosarmodeller.read([mergedArxml])
+    srIf = autosarmodeller.get_node('/Interfaces/srif1')
+    assert (len(srIf.referenced_by) == 2), 'should be referenced by 2 elements'
+    
+    for ref_by in srIf.referenced_by:
+        if isinstance(ref_by, autosarmodeller.PPortPrototype):
+            assert (ref_by.name == 'outPort'), 'name should be outPort'
+            assert (ref_by.get_providedInterface() == srIf), 'interfaces should be same'
+        elif isinstance(ref_by, autosarmodeller.RPortPrototype):
+            assert (ref_by.name == 'inPort'), 'name should be inPort'
+            assert (ref_by.get_requiredInterface() == srIf), 'interfaces should be same'
+
+    csIf = autosarmodeller.get_node('/Interfaces/csIf')
+    assert (len(csIf.referenced_by) == 1), 'should be referenced by 1 element'
+    ref_by = next(iter(csIf.referenced_by))
+    assert (isinstance(ref_by, autosarmodeller.PRPortPrototype)), 'should be instance of PRPortPrototype'
+    assert (ref_by.name == 'p1'), 'name should be p1'
+    assert (ref_by.get_providedRequiredInterface() == csIf), 'interfaces should be same'

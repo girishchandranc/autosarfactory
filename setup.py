@@ -11,8 +11,8 @@ with open('LICENSE') as f:
 
 setup(
     name='AutosarModeller',
-    version='0.1.0',
-    description='Python module for reading autosar module configuration arxml files',
+    version='0.1.1',
+    description='Python module for modelling autosar arxml files',
     long_description=readme,
     long_description_content_type="text/markdown",
     author='Girish Chandran',
