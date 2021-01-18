@@ -101,6 +101,26 @@ srIf.new_DataElement('de1')
 autosarmodeller.saveAs('mergedFile.arxml')
 ```
 
+### Autosar visualizer
+The package also includes a graphical visualizer for the Autosar models which can be simply opened by passing the autosar root to the method `show_in_ui`.
+For example:
+```python
+files = ['component.arxml', 'datatypes.arxml']
+root,status = autosarmodeller.read(files)
+autosar_ui.show_in_ui(root)
+```
+
+Please see below a screenshot of the visualizer.
+
+![visualizer](https://user-images.githubusercontent.com/31938966/104857295-af979980-5917-11eb-8754-f4e889e76a2f.png)
+
+
+The visualizer mainly consists of 4 views.
+- Autosar Explorer - A simple tree which shows all elements in the model.
+- Property view - Info about property and its corresponding values of the selected element in autosar explorer.
+- Referenced by view - This views list elements which references the selected element in autosar explorer.
+- Search view - Provision to search any elements in the model.
+
 ## Examples
 Please check the script inside the `Examples`folder which creates a basic communication matrix. 
 

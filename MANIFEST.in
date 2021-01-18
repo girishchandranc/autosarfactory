@@ -1,2 +1,3 @@
 include Examples/*
 include Examples/generated/*
+include autosarmodeller/resources/*
