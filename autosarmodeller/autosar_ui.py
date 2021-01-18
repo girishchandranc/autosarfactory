@@ -1,10 +1,13 @@
 from enum import Enum
 import tkinter as tk
 import tkinter.ttk as ttk
+import tkinter.font as tkFont
+from ttkthemes import ThemedStyle
 import os,itertools
 from .autosarmodeller import AutosarNode, Referrable
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
+__PAD_X__ = 5 # For some additional padding in the column width
 
 class Application(tk.Frame):
     def __init__(self, root, autosar_root):
@@ -23,8 +26,7 @@ class Application(tk.Frame):
         self.__property_view_id_to_node_dict = {}
         self.__search_view_id_to_node_dict = {}
         self.__go_to_node_id_in_asr_explorer = None
-        self.__root_tree = None
-        #root.attributes('-zoomed', True)
+        self.__font__ = tkFont.nametofont('TkHeadingFont')
         self.__populate_tree(autosar_root)
  
     def __initialize_ui(self):
@@ -34,15 +36,9 @@ class Application(tk.Frame):
         self.__root.minsize(width=800, height=600)
 
         # set theme
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure("Treeview",
-                background="#E1E1E1",
-                foreground="#000000",
-                rowheight=20,
-                fieldbackground="#E1E1E1")
-        # set backgound and foreground color when selected
-        style.map('Treeview', background=[('selected', '#BFBFBF')], foreground=[('selected', 'black')])
+        style = ThemedStyle(self.__root)
+        style.theme_use('scidgreen')
+        #or use -->adapta,arc,scidgreen,radiance
 
         # create ui components
         splitter = tk.PanedWindow(orient=tk.VERTICAL)
@@ -54,8 +50,8 @@ class Application(tk.Frame):
         self.__asr_explorer.heading('#0', text='Element')
         self.__asr_explorer.heading('#1', text='Type')
         # Specify attributes of the columns (We want to stretch it!)
-        self.__asr_explorer.column('#0', stretch=tk.YES, minwidth=100, width = 100)
-        self.__asr_explorer.column('#1', stretch=tk.YES, minwidth=100, width = 100)
+        self.__asr_explorer.column('#0', stretch=tk.YES, minwidth=100, width = 0)
+        self.__asr_explorer.column('#1', stretch=tk.YES, minwidth=100, width = 0)
 
         # Add scroll bars
         vsb = ttk.Scrollbar(top_frame, orient="vertical", command=self.__asr_explorer.yview)
@@ -67,30 +63,29 @@ class Application(tk.Frame):
         # Set the heading (Attribute Names)
         self.__property_view.heading('#0', text='Property')
         self.__property_view.heading('#1', text='Value')
-        self.__property_view.column('#0', stretch=tk.YES, minwidth=50)
-        self.__property_view.column('#1', stretch=tk.YES, minwidth=50)
+        self.__property_view.column('#0', stretch=tk.YES, minwidth=150)
+        self.__property_view.column('#1', stretch=tk.YES, minwidth=150)
         # Add scroll bars
         vsb1 = ttk.Scrollbar(bottom_frame, orient="vertical", command=self.__property_view.yview)
         hsb1 = ttk.Scrollbar(bottom_frame, orient="horizontal", command=self.__property_view.xview)
 
         # Create the referred_by tree
-        self.__referred_by_view = ttk.Treeview(bottom_frame)
-        # Set the heading (Attribute Names)
-        self.__referred_by_view.heading('#0', text='Referenced By')
-        self.__referred_by_view.column('#0', stretch=tk.YES, minwidth=100)
+        referenced_by_frame = ttk.Frame(bottom_frame)
+        referenced_by_label = ttk.Label(referenced_by_frame, text="Referenced By")
+        self.__referred_by_view = ttk.Treeview(referenced_by_frame, show="tree")
+        self.__referred_by_view.column('#0', stretch=tk.YES, minwidth=50)
         # Add scroll bars
-        vsb2 = ttk.Scrollbar(bottom_frame, orient="vertical", command=self.__referred_by_view.yview)
-        hsb2 = ttk.Scrollbar(bottom_frame, orient="horizontal", command=self.__referred_by_view.xview)
+        vsb2 = ttk.Scrollbar(referenced_by_frame, orient="vertical", command=self.__referred_by_view.yview)
+        hsb2 = ttk.Scrollbar(referenced_by_frame, orient="horizontal", command=self.__referred_by_view.xview)
 
         # create the search view
         search_frame = ttk.Frame(bottom_frame)
         self.__search_field = ttk.Entry(search_frame)
         self.__search_field.insert(0, 'search')
-        #go_button = ttk.Button(search_frame, text='Go', command=self.__on_next_button_click)
-        self.__search_view = ttk.Treeview(search_frame)
-        # Set the heading (Attribute Names)
-        self.__search_view.heading('#0', text='Results')
-        self.__search_view.column('#0', stretch=tk.YES, minwidth=100)
+        search_results_label = ttk.Label(search_frame, text="Results")
+        self.__search_view = ttk.Treeview(search_frame, show="tree")
+        self.__search_view.column('#0', stretch=tk.YES, minwidth=50)
+
         # Add scroll bars
         vsb3 = ttk.Scrollbar(search_frame, orient="vertical", command=self.__search_view.yview)
         hsb3 = ttk.Scrollbar(search_frame, orient="horizontal", command=self.__search_view.xview)
@@ -112,29 +107,39 @@ class Application(tk.Frame):
         vsb.grid(row=0, column=1, sticky='ns')
         hsb.grid(row=1, column=0, sticky='ew')
 
+        # top_frame.rowconfigure(1, weight=1)
         top_frame.rowconfigure(0, weight=1)
         top_frame.columnconfigure(0, weight=1)
 
         # bottom layout
-        self.__property_view.grid(row=0, column=0, sticky='NSEW')
+        self.__property_view.grid(row=0, column=0, sticky='nsew')
         vsb1.grid(row=0, column=1, sticky='ns')
         hsb1.grid(row=1, column=0, sticky='ew')
-        self.__referred_by_view.grid(row=0, column=2, sticky='NSEW')
-        vsb2.grid(row=0, column=3, sticky='ns')
-        hsb2.grid(row=1, column=2, sticky='ew')
+
+        # referenced_by layout
+        referenced_by_frame.grid(row=0, column=2, sticky='nsew')
+        referenced_by_label.grid(row=0, column=2, sticky='ew')
+        self.__referred_by_view.grid(row=1, column=2, sticky='nsew')
+        vsb2.grid(row=1, column=3, sticky='ns')
+        hsb2.grid(row=2, column=2, sticky='ew')
+        referenced_by_frame.rowconfigure(1, weight=1)
+        referenced_by_frame.columnconfigure(2, weight=1)
+
+        # search frame layout
         search_frame.grid(row=0, column=4, sticky='nsew')
         self.__search_field.grid(row=0, column=3, sticky='nsew')
+        search_results_label.grid(row=1, column=3, sticky='ew')
         self.__search_view.grid(row=2, column=3, sticky='nsew')
-        vsb3.grid(row=2, column=4, sticky='ns')
-        hsb3.grid(row=3, column=3, sticky='ew')
-
+        vsb3.grid(row=2, column=5, sticky='ns')
+        hsb3.grid(row=4, column=3, sticky='ew')
         search_frame.rowconfigure(2, weight=1)
         search_frame.columnconfigure(4, weight=1)
 
         bottom_frame.rowconfigure(0, weight=1)
         bottom_frame.columnconfigure(0, weight=1)
+        bottom_frame.columnconfigure(2, weight=1)
 
-        ##create menu items
+        # create menu items
         self.__go_to_menu = tk.Menu(self.__root, tearoff=0)
         self.__go_to_menu.add_command(label='Go to item', command=self.__go_to_node_in_asr_explorer)
 
@@ -145,10 +150,12 @@ class Application(tk.Frame):
 
         # bind tree for:
         # selection
-        self.__asr_explorer.bind("<Button-1>", self.__on_selection)
+        self.__asr_explorer.bind("<Button-1>", self.__on_asr_explorer_selection)
+        self.__asr_explorer.bind("<KeyRelease>", self.__on_asr_explorer_key_released)
         self.__search_view.bind("<Button-1>", self.__on_search_view_selection)
+        self.__search_view.bind("<KeyRelease>", self.__on_search_view_key_released)
 
-        #right-click
+        # right-click
         self.__referred_by_view.bind("<Button-3>", self.__on_referred_by_view_right_click)
         self.__property_view.bind("<Button-3>", self.__on__properties_view_right_click)
 
@@ -211,21 +218,35 @@ class Application(tk.Frame):
         self.__asr_explorer.item(id, open=True)
 
 
-    def __on_selection(self, event):
+    def __on_asr_explorer_selection(self, event):
         # find entry
-        item = self.__asr_explorer.identify('item',event.x,event.y)
+        self.__select_node(self.__asr_explorer.identify('item',event.x,event.y))
+
+
+    def __select_node(self, item):
         if item != '':
             node = self.__asr_explorer_id_to_node_dict[int(item)]
             self.__update_properties_view(node)
             self.__update_referred_by_view(node)
 
 
+    def __on_asr_explorer_key_released(self, event):
+        self.__select_node(self.__asr_explorer.focus())
+
+
     def __on_search_view_selection(self, event):
-        # find entry
-        item = self.__search_view.identify('item',event.x,event.y)
+        self.__search_view_select_node(self.__search_view.identify('item',event.x,event.y))
+
+
+    def __on_search_view_key_released(self, event):
+        self.__search_view_select_node(self.__search_view.focus())
+
+
+    def __search_view_select_node(self, item):
         if item != '':
             self.__go_to_node_id_in_asr_explorer = self.__asr_explorer_node_to_id_dict[self.__search_view_id_to_node_dict[int(item)]]
             self.__go_to_node_in_asr_explorer()
+
 
 
     def __update_properties_view(self, node):
@@ -250,6 +271,11 @@ class Application(tk.Frame):
                 if isinstance(value, Referrable):
                     self.__property_view_id_to_node_dict[id] = value
 
+            # adjust column's width if necessary to fit each value
+            col_w = self.__get_padded_text_width(propertyValue)
+            if self.__property_view.column('#1',width=None) < col_w:
+                self.__property_view.column('#1', width=col_w)
+
             self.__property_view.insert('', 
                                         "end", 
                                         iid=id,
@@ -266,10 +292,18 @@ class Application(tk.Frame):
         # Add new values
         id = 1
         for node in nodes:
+            text = str(node)
             self.__search_view.insert('', 
                                         "end", 
                                         iid=id,
-                                        text=str(node))
+                                        text=text)
+
+            # adjust column's width if necessary to fit each value
+            col_w = self.__get_padded_text_width(text)
+            if self.__search_view.column('#0',width=None) < col_w:
+                self.__search_view.column('#0', width=col_w)
+
+            # Add to dict for later usage
             self.__search_view_id_to_node_dict[id] = node
             id +=1
 
@@ -281,10 +315,18 @@ class Application(tk.Frame):
 
         id = 1
         for ref in node.referenced_by:
+            text = str(ref)
             self.__referred_by_view.insert('', 
                                     "end", 
                                     iid=id,
-                                    text=(str(ref)))
+                                    text=text)
+
+            # adjust column's width if necessary to fit each value
+            col_w = self.__get_padded_text_width(text)
+            if self.__referred_by_view.column('#0',width=None) < col_w:
+                self.__referred_by_view.column('#0', width=col_w)
+
+            # Add to dict for later usage
             self.__referred_by_view_id_to_node_dict[id] = ref
             id += 1
 
@@ -292,10 +334,10 @@ class Application(tk.Frame):
     def __populate_tree(self, autosar_root):
         idCounter = itertools.count()
         id = next(idCounter)
-        self.__root_tree = self.__asr_explorer.insert('', 'end', iid=id, text="AutosarRoot", values=('AUTOSAR'))
+        root_tree = self.__asr_explorer.insert('', 'end', iid=id, text="AutosarRoot", values=('AUTOSAR'))
         self.__asr_explorer_id_to_node_dict[id] = autosar_root
         self.__asr_explorer_node_to_id_dict[autosar_root] = id
-        self.__add_child(autosar_root, self.__root_tree, idCounter)
+        self.__add_child(autosar_root, root_tree, idCounter)
 
 
     def __add_child(self, node, parentItem, idCounter):
@@ -309,11 +351,30 @@ class Application(tk.Frame):
         id = next(idCounter)
         self.__asr_explorer_id_to_node_dict[id] = node
         self.__asr_explorer_node_to_id_dict[node] = id
+
+        element_text = node.name if node.name is not None else node.__class__.__name__
+        type_text = str(node)
+
+        """
+        # adjust column's width if necessary to fit each value
+        col_w = self.__get_padded_text_width(element_text)
+        if self.__asr_explorer.column('#0',width=None) < col_w:
+            self.__asr_explorer.column('#0', width=col_w)
+
+        col_w = self.__get_padded_text_width(type_text)
+        if self.__asr_explorer.column('#1',width=None) < col_w:
+            self.__asr_explorer.column('#1', width=col_w)
+        """
+
         return self.__asr_explorer.insert(parentItem, 
                                     "end", 
                                     iid=id,
-                                    text=node.name if node.name is not None else node.__class__.__name__, 
-                                    values=(str(node)))
+                                    text=element_text, 
+                                    values=type_text)
+
+
+    def __get_padded_text_width(self, text):
+        return self.__font__.measure(text + '__') + (2 * __PAD_X__)
 
 
 def show_in_ui(autosarRoot):

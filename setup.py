@@ -11,7 +11,7 @@ with open('LICENSE') as f:
 
 setup(
     name='AutosarModeller',
-    version='0.1.1',
+    version='0.2.0',
     description='Python module for modelling autosar arxml files',
     long_description=readme,
     long_description_content_type="text/markdown",
@@ -21,6 +21,7 @@ setup(
     license="MIT",
     packages=find_packages(exclude=('tests')),
     include_package_data=True,
-    install_requires=["lxml>=4.6.1"],
+    install_requires=["lxml>=4.6.1",
+                      "ttkthemes>=3.2.0"],
     python_requires='>=3.6',
 )
