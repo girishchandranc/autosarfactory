@@ -1,6 +1,6 @@
 [![Build Actions Status](https://github.com/girishchandranc/autosarmodeller/workflows/Build/badge.svg)](https://github.com/girishchandranc/autosarmodeller/actions)
 # Autosar Modelling Tool
-AutosarModeller provides nice methods to read/create/modify AUTOSAR compliant arxml files.
+AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arxml files.
 
 ## How to use
 - Clone the repository.
