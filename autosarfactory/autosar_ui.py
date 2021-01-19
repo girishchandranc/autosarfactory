@@ -4,7 +4,7 @@ import tkinter.ttk as ttk
 import tkinter.font as tkFont
 from ttkthemes import ThemedStyle
 import os,itertools
-from .autosarmodeller import AutosarNode, Referrable
+from .autosarfactory import AutosarNode, Referrable
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
 __PAD_X__ = 5 # For some additional padding in the column width
