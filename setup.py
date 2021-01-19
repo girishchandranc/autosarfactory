@@ -10,7 +10,7 @@ with open('LICENSE') as f:
     license = f.read()
 
 setup(
-    name='AutosarModeller',
+    name='AutosarFactory',
     version='0.2.0',
     description='Python module for modelling autosar arxml files',
     long_description=readme,
