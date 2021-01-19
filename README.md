@@ -9,7 +9,7 @@ AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arx
     $ python setup.py install
 > use `python3` if you have both `python2` and `python3` installed.
 
-- Import the package `autosarmodeller` to your python script.
+- Import the package `autosarmodeller` from `autosarfactory` to your python script.
 - And, finally have fun with modelling AUTOSAR.
 
 ### Reading file
