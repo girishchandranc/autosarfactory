@@ -1,4 +1,4 @@
-[![Build Actions Status](https://github.com/girishchandranc/autosarmodeller/workflows/Build/badge.svg)](https://github.com/girishchandranc/autosarmodeller/actions)
+[![Build Actions Status](https://github.com/girishchandranc/autosarfactory/workflows/Build/badge.svg)](https://github.com/girishchandranc/autosarfactory/actions)
 # Autosar Modelling Tool
 AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arxml files.
 
@@ -9,19 +9,19 @@ AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arx
     $ python setup.py install
 > use `python3` if you have both `python2` and `python3` installed.
 
-- Import the package `autosarmodeller` from `autosarfactory` to your python script.
+- Import the package `autosarfactory` to your python script.
 - And, finally have fun with modelling AUTOSAR.
 
 ### Reading file
 ```python
 files = ['component.arxml', 'datatypes.arxml']
-root, status = autosarmodeller.read(files)
+root, status = autosarfactory.read(files)
 ```
 The read method processes the input files and return the root node(with merged info of all the given files). The status gives an info if the file reading was successful.
 
 ### Creating new file
 ```python
-newPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'NewPack')
+newPack = autosarfactory.new_file('newFile.arxml', defaultArPackage = 'NewPack')
 ```
 Creates a new arxml file with the given package name and returns the ARPackage object.
 - If package name is not provided, default package name 'RootPackage' is used. 
@@ -38,7 +38,7 @@ All the elements have `set_<attribute/reference>`methods to modify the attribute
 ### Adding new model elements
 All the parent classes have `new_<element>` methods to create an element.
 ```python
-rootPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'RootPack')
+rootPack = autosarfactory.new_file('newFile.arxml', defaultArPackage = 'RootPack')
 newPack = rootPack.new_ARPackage('NewPack')
 #new applicaton component
 asw1 = newPack.new_ApplicationSwComponentType('asw1')
@@ -52,9 +52,9 @@ srIf.new_DataElement('de1')
 Once the file is read by the tool, its possible to access elements by path.
 ```python
 files = ['component.arxml', 'datatypes.arxml']
-autosarmodeller.read(files)
-swc = autosarmodeller.get_node('/Swcs/asw1')
-uint8DataType = autosarmodeller.get_node('/DataTypes/baseTypes/uint8')
+autosarfactory.read(files)
+swc = autosarfactory.get_node('/Swcs/asw1')
+uint8DataType = autosarfactory.get_node('/DataTypes/baseTypes/uint8')
 ```
 
 ### Saving options
@@ -62,9 +62,9 @@ uint8DataType = autosarmodeller.get_node('/DataTypes/baseTypes/uint8')
 The tool provides `save` method to save the changes made to the model.
 ```python
 files = ['component.arxml', 'datatypes.arxml']
-autosarmodeller.read(files)
+autosarfactory.read(files)
 
-rootPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'RootPack')
+rootPack = autosarfactory.new_file('newFile.arxml', defaultArPackage = 'RootPack')
 newPack = rootPack.new_ARPackage('NewPack')
 
 #new applicaton component
@@ -76,7 +76,7 @@ srIf = newPack.new_SenderReceiverInterface('srif1')
 srIf.new_DataElement('de1')
 
 #save changes
-autosarmodeller.save(['newFile.arxml'])
+autosarfactory.save(['newFile.arxml'])
 ```
 The `save` method accepts a list of file which needs to be saved. If no argument is provided, all the files(input, newly created) will be saved.
 
@@ -84,9 +84,9 @@ The `save` method accepts a list of file which needs to be saved. If no argument
 The tool provides `saveAs` method to save the changes made to the model into a single arxml file.
 ```python
 files = ['component.arxml', 'datatypes.arxml']
-autosarmodeller.read(files)
+autosarfactory.read(files)
 
-rootPack = autosarmodeller.new_file('newFile.arxml', defaultArPackage = 'RootPack')
+rootPack = autosarfactory.new_file('newFile.arxml', defaultArPackage = 'RootPack')
 newPack = rootPack.new_ARPackage('NewPack')
 
 #new applicaton component
@@ -98,7 +98,7 @@ srIf = newPack.new_SenderReceiverInterface('srif1')
 srIf.new_DataElement('de1')
 
 #save changes
-autosarmodeller.saveAs('mergedFile.arxml')
+autosarfactory.saveAs('mergedFile.arxml')
 ```
 
 ### Autosar visualizer
@@ -106,7 +106,7 @@ The package also includes a graphical visualizer for the Autosar models which ca
 For example:
 ```python
 files = ['component.arxml', 'datatypes.arxml']
-root,status = autosarmodeller.read(files)
+root,status = autosarfactory.read(files)
 autosar_ui.show_in_ui(root)
 ```
 
@@ -122,6 +122,6 @@ The visualizer mainly consists of 4 views.
 - Search view - Provision to search any elements in the model.
 
 ## Examples
-Please check the script inside the `Examples`folder which creates a basic communication matrix. 
+Please check the script inside the `Examples` folder which creates a basic communication matrix. 
 
 For more information on the usage, please refer `tests/test_autosarmodel.py`.

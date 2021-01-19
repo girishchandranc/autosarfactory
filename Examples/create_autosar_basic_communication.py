@@ -1,7 +1,7 @@
 import os, sys
 mod_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, mod_path)
-from autosarmodeller import autosarmodeller
+from autosarfactory import autosarfactory
 
 generatdDir = os.path.join(os.path.dirname(__file__), 'generated')
 dataTypesFile = os.path.join(generatdDir, 'dataTypes.arxml')
@@ -10,7 +10,7 @@ componentsFile = os.path.join(generatdDir, 'components.arxml')
 canNetworkFile = os.path.join(generatdDir, 'CanNetwork.arxml')
 mergedFile = os.path.join(generatdDir, 'merged.arxml')
 
-dtPack = autosarmodeller.new_file(dataTypesFile, defaultArPackage = 'DataTypes', overWrite = True)
+dtPack = autosarfactory.new_file(dataTypesFile, defaultArPackage = 'DataTypes', overWrite = True)
 baseTypePack = dtPack.new_ARPackage('baseTypes')
 uint8BaseType = baseTypePack.new_SwBaseType('uint8')
 
@@ -18,13 +18,13 @@ implTypePack = dtPack.new_ARPackage('ImplTypes')
 uint8 = implTypePack.new_ImplementationDataType('uint8')
 uint8.new_SwDataDefProps().new_SwDataDefPropsVariant().set_baseType(uint8BaseType)
 
-ifPack = autosarmodeller.new_file(interfaceFile, defaultArPackage = 'Interfaces', overWrite = True)
+ifPack = autosarfactory.new_file(interfaceFile, defaultArPackage = 'Interfaces', overWrite = True)
 srIf = ifPack.new_SenderReceiverInterface('srif1')
 vdp = srIf.new_DataElement('de1')
 vdp.set_type(uint8)
 vdp.new_NumericalValueSpecification().new_Value().set('1')
 
-swcPack = autosarmodeller.new_file(componentsFile, defaultArPackage = 'Swcs', overWrite = True)
+swcPack = autosarfactory.new_file(componentsFile, defaultArPackage = 'Swcs', overWrite = True)
 asw1 = swcPack.new_ApplicationSwComponentType('asw1')
 port1 = asw1.new_PPortPrototype('outPort')
 port1.set_providedInterface(srIf)
@@ -76,15 +76,15 @@ required = conn1.new_Requester()
 required.set_contextComponent(asw2_proto)
 required.set_targetRPort(port2)
 
-canNetworkPack = autosarmodeller.new_file(canNetworkFile, defaultArPackage = 'Can', overWrite = True)
+canNetworkPack = autosarfactory.new_file(canNetworkFile, defaultArPackage = 'Can', overWrite = True)
 signalsPack = canNetworkPack.new_ARPackage('signals')
 systemsignalsPack = canNetworkPack.new_ARPackage('systemsignals')
 syssig1 = systemsignalsPack.new_SystemSignal('syssig1')
 
 sig1 = signalsPack.new_ISignal('sig1')
 sig1.set_length(4)
-sig1.set_dataTypePolicy(autosarmodeller.DataTypePolicyEnum.VALUE_LEGACY)
-sig1.set_iSignalType(autosarmodeller.ISignalTypeEnum.VALUE_PRIMITIVE)
+sig1.set_dataTypePolicy(autosarfactory.DataTypePolicyEnum.VALUE_LEGACY)
+sig1.set_iSignalType(autosarfactory.ISignalTypeEnum.VALUE_PRIMITIVE)
 sig1.set_systemSignal(syssig1)
 
 ecuPack = canNetworkPack.new_ARPackage('ecus')
@@ -109,5 +109,5 @@ swcMap1.set_contextComposition(rootComp)
 swcMap1.add_contextComponent(asw1_proto)
 swcMap1.add_contextComponent(asw2_proto)
 
-autosarmodeller.save()
-autosarmodeller.saveAs(mergedFile, overWrite = True)
+autosarfactory.save()
+autosarfactory.saveAs(mergedFile, overWrite = True)
