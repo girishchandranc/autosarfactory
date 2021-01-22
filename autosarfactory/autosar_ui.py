@@ -4,7 +4,7 @@ import tkinter.ttk as ttk
 import tkinter.font as tkFont
 from ttkthemes import ThemedStyle
 import os,itertools
-from .autosarfactory import AutosarNode, Referrable
+from .autosarfactory import Referrable
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
 __PAD_X__ = 5 # For some additional padding in the column width
@@ -15,6 +15,7 @@ class Application(tk.Frame):
         self.__asr_explorer = None
         self.__property_view = None
         self.__referred_by_view = None
+        self.__search_dropdown = None
         self.__search_field = None
         self.__search_view = None
         self.__go_to_menu = None
@@ -28,7 +29,7 @@ class Application(tk.Frame):
         self.__go_to_node_id_in_asr_explorer = None
         self.__font__ = tkFont.nametofont('TkHeadingFont')
         self.__populate_tree(autosar_root)
- 
+
     def __initialize_ui(self):
         # Configure the root object for the Application
         self.__root.iconphoto(True, self.__asr_img)
@@ -37,7 +38,10 @@ class Application(tk.Frame):
 
         # set theme
         style = ThemedStyle(self.__root)
-        style.theme_use('scidgreen')
+        #print(style.themes)
+#        ['yaru', 'default', 'vista', 'classic', 'scidgreen', 'equilux', 'scidgrey', 'adapta', 'scidpink', 'scidmint', 'plastik', 'alt', 'clearlooks', 'itft1', 'smog', 'clam', 'scidsand', 'kroc', 'radiance', 'black', 'blue', 'arc', 'winxpblue', 'scidblue', 'ubuntu', 'keramik', 'winnative', 'elegance', 'aquativo', 'scidpurple', 'xpnative', 'breeze']
+        style.theme_use("equilux") #- very slow for some reason
+        #style.theme_use("vista")
         #or use -->adapta,arc,scidgreen,radiance
 
         # create ui components
@@ -80,6 +84,8 @@ class Application(tk.Frame):
 
         # create the search view
         search_frame = ttk.Frame(bottom_frame)
+        self.__search_type = ttk.Label(search_frame, text="Search Type")
+        self.__search_dropdown = ttk.Combobox(search_frame, values=["Short Name","Refference","Regular Expression"])
         self.__search_field = ttk.Entry(search_frame)
         self.__search_field.insert(0, 'search')
         search_results_label = ttk.Label(search_frame, text="Results")
@@ -127,13 +133,16 @@ class Application(tk.Frame):
 
         # search frame layout
         search_frame.grid(row=0, column=4, sticky='nsew')
-        self.__search_field.grid(row=0, column=3, sticky='nsew')
-        search_results_label.grid(row=1, column=3, sticky='ew')
-        self.__search_view.grid(row=2, column=3, sticky='nsew')
-        vsb3.grid(row=2, column=5, sticky='ns')
-        hsb3.grid(row=4, column=3, sticky='ew')
-        search_frame.rowconfigure(2, weight=1)
-        search_frame.columnconfigure(4, weight=1)
+        self.__search_type.grid(row=0, column=3, sticky='ew')
+        self.__search_dropdown.grid(row=0, column=4, sticky='ew')
+        self.__search_dropdown.current(0)
+        self.__search_field.grid(row=1, column=3,columnspan=2, sticky='ew')
+        search_results_label.grid(row=2, column=3, sticky='ew', columnspan=2)
+        self.__search_view.grid(row=3, column=3, sticky='nsew',columnspan=2)
+        vsb3.grid(row=3, column=5, sticky='ns')
+        hsb3.grid(row=5, column=3, sticky='ew',columnspan=2)
+        search_frame.rowconfigure(3, weight=1)
+        search_frame.columnconfigure(5, weight=1)
 
         bottom_frame.rowconfigure(0, weight=1)
         bottom_frame.columnconfigure(0, weight=1)
@@ -167,11 +176,19 @@ class Application(tk.Frame):
             self.__search_field.insert(0, '') #Insert blank for user input
             self.__search_field.config(foreground='black')
         elif search_string != '':
-            search_nodes = []
-            for node in self.__asr_explorer_id_to_node_dict.values():
-                if node.name is not None and search_string.lower() in node.name.lower():
-                    search_nodes.append(node)
-            self.__update_search_view(search_nodes)
+            search_type = self.__search_dropdown.get()
+            if search_type == "Short Name":
+                search_nodes = []
+                for node in self.__asr_explorer_id_to_node_dict.values():
+                    if node.name is not None and search_string.lower() in node.name.lower():
+                        search_nodes.append(node)
+                self.__update_search_view(search_nodes)
+            elif search_type == "Refference":
+#                TODO:implement search by refference
+                self.__update_search_view([])
+            elif search_type == "Regular Expression":
+#                TODO:implement search by refference
+                self.__update_search_view([])
         else:
             self.__update_search_view([])
 

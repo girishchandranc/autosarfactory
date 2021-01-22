@@ -119,7 +119,7 @@ The visualizer mainly consists of 4 views.
 - Autosar Explorer - A simple tree which shows all elements in the model.
 - Property view - Info about property and its corresponding values of the selected element in autosar explorer.
 - Referenced by view - This views list elements which references the selected element in autosar explorer.
-- Search view - Provision to search any elements in the model.
+- Search view - Provision to search any elements in the model. The type of search can be selected through a combobox at the top of the view. (Currently only searching by short name is implemented;this is planned to be extended in the future with other types of search e.g. search by refference, regular expressions...). 
 
 ## Examples
 Please check the script inside the `Examples` folder which creates a basic communication matrix. 
