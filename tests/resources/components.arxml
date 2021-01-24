@@ -47,6 +47,18 @@
           <PORTS>
             <R-PORT-PROTOTYPE>
               <SHORT-NAME>inPort</SHORT-NAME>
+              <REQUIRED-COM-SPECS>
+                <NONQUEUED-RECEIVER-COM-SPEC>
+                  <DATA-ELEMENT-REF DEST="VARIABLE-DATA-PROTOTYPE">/Interfaces/srif1/de1</DATA-ELEMENT-REF>
+                  <ENABLE-UPDATE>true</ENABLE-UPDATE>
+                  <FILTER>
+                    <DATA-FILTER-TYPE>MASKED-NEW-EQUALS-X</DATA-FILTER-TYPE>
+                    <MASK>0xfff</MASK>
+                    <MAX>0b1111</MAX>
+                    <MIN>04567</MIN>
+                  </FILTER>
+                </NONQUEUED-RECEIVER-COM-SPEC>
+              </REQUIRED-COM-SPECS>
               <REQUIRED-INTERFACE-TREF DEST="SENDER-RECEIVER-INTERFACE">/Interfaces/srif1</REQUIRED-INTERFACE-TREF>
             </R-PORT-PROTOTYPE>
           </PORTS>
