@@ -112,7 +112,7 @@ autosar_ui.show_in_ui(root)
 
 Please see below a screenshot of the visualizer.
 
-![AutosarVisualizer-2021-01-22 143059](https://user-images.githubusercontent.com/55708936/105509642-61e3ae00-5cd6-11eb-8a47-f45b8e44d683.jpg)
+![AutosarVisualizer-2021-01-26 130700](https://user-images.githubusercontent.com/55708936/105837616-a1acdd00-5fd7-11eb-92ee-6255ae202749.jpg)
 
 
 The visualizer mainly consists of 4 views.
