@@ -11,7 +11,7 @@ with open('LICENSE') as f:
 
 setup(
     name='AutosarFactory',
-    version='0.2.0',
+    version='0.2.1',
     description='Python module for modelling autosar arxml files',
     long_description=readme,
     long_description_content_type="text/markdown",
