@@ -1,6 +1,6 @@
 def get_int_value(text):
     text = text.strip()
-    if len(text) > 0 and text[:1] == '0':
+    if len(text) > 1 and text[:1] == '0':
         second_char = text[1:2]
         if second_char == 'x' or second_char == 'X':
             # hexa-decimal value
