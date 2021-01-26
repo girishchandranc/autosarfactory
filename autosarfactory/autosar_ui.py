@@ -2,14 +2,37 @@ from enum import Enum
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.font as tkFont
-from ttkthemes import ThemedStyle
+import re
 import os,itertools
+from ttkthemes import ThemedStyle
 from .autosarfactory import Referrable
+from tkinter import Menu
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
 __PAD_X__ = 5 # For some additional padding in the column width
 
 class Application(tk.Frame):
+
+    def selectTheme(self, themeName):
+        style = ThemedStyle(self.__root)
+        if(themeName == 'scidgreen'):
+            self.__current_theme='scidgreen'
+        elif(themeName == 'ubuntu'):
+            self.__current_theme='ubuntu'
+        elif(themeName == 'alt'):
+            self.__current_theme='alt'
+        elif(themeName == 'equilux'):
+            self.__current_theme='equilux'
+        elif(themeName == 'classic'):
+            self.__current_theme='classic'
+        elif(themeName == 'vista'):
+            self.__current_theme='vista'
+        elif(themeName == 'default'):
+            self.__current_theme='default'
+        else:
+            self.__current_theme='scidgreen'
+        style.theme_use(self.__current_theme)
+
     def __init__(self, root, autosar_root):
         self.__root = root
         self.__asr_explorer = None
@@ -19,6 +42,7 @@ class Application(tk.Frame):
         self.__search_field = None
         self.__search_view = None
         self.__go_to_menu = None
+        self.__current_theme = 'scidgreen'
         self.__asr_img = tk.PhotoImage(file=os.path.join(__resourcesDir__, 'autosar.png'))
         self.__initialize_ui()
         self.__asr_explorer_id_to_node_dict = {}
@@ -40,13 +64,28 @@ class Application(tk.Frame):
         style = ThemedStyle(self.__root)
         #print(style.themes)
 #        ['yaru', 'default', 'vista', 'classic', 'scidgreen', 'equilux', 'scidgrey', 'adapta', 'scidpink', 'scidmint', 'plastik', 'alt', 'clearlooks', 'itft1', 'smog', 'clam', 'scidsand', 'kroc', 'radiance', 'black', 'blue', 'arc', 'winxpblue', 'scidblue', 'ubuntu', 'keramik', 'winnative', 'elegance', 'aquativo', 'scidpurple', 'xpnative', 'breeze']
-        style.theme_use("equilux") #- very slow for some reason
-        #style.theme_use("vista")
-        #or use -->adapta,arc,scidgreen,radiance
+        #style.theme_use("equilux") #- very slow for some reason
+
+        style.theme_use('scidgreen')
 
         # create ui components
         splitter = tk.PanedWindow(orient=tk.VERTICAL)
         top_frame = tk.Frame(splitter)
+
+        menubar = Menu(self.__root)
+        filemenu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Select theme", menu=filemenu)
+
+        filemenu.add_command(label="default", command=lambda:self.selectTheme('default'))
+        filemenu.add_command(label="scidgreen", command=lambda:self.selectTheme('scidgreen'))
+        filemenu.add_command(label="ubuntu", command=lambda:self.selectTheme('ubuntu'))
+        filemenu.add_command(label="classic", command=lambda:self.selectTheme('classic'))
+        filemenu.add_command(label="vista", command=lambda:self.selectTheme('vista'))
+        filemenu.add_command(label="alt", command=lambda:self.selectTheme('alt'))
+        filemenu.add_command(label="equilux", command=lambda:self.selectTheme('equilux'))
+        self.__root.config(menu=menubar)
+
+        menubar.add_command(label="Exit", command=lambda:self.client_exit(self.__root))
 
         # Create the autosar explorer
         self.__asr_explorer = ttk.Treeview(top_frame, columns=('Type'))
@@ -64,11 +103,13 @@ class Application(tk.Frame):
         bottom_frame = tk.Frame(splitter)
         # Create the properties tree
         self.__property_view = ttk.Treeview(bottom_frame, columns=('Value'))
+
         # Set the heading (Attribute Names)
         self.__property_view.heading('#0', text='Property')
         self.__property_view.heading('#1', text='Value')
         self.__property_view.column('#0', stretch=tk.YES, minwidth=150)
         self.__property_view.column('#1', stretch=tk.YES, minwidth=150)
+
         # Add scroll bars
         vsb1 = ttk.Scrollbar(bottom_frame, orient="vertical", command=self.__property_view.yview)
         hsb1 = ttk.Scrollbar(bottom_frame, orient="horizontal", command=self.__property_view.xview)
@@ -85,7 +126,7 @@ class Application(tk.Frame):
         # create the search view
         search_frame = ttk.Frame(bottom_frame)
         self.__search_type = ttk.Label(search_frame, text="Search Type")
-        self.__search_dropdown = ttk.Combobox(search_frame, values=["Short Name","Refference","Regular Expression"])
+        self.__search_dropdown = ttk.Combobox(search_frame, values=["Short Name","Autosar Type","Regular Expression"])
         self.__search_field = ttk.Entry(search_frame)
         self.__search_field.insert(0, 'search')
         search_results_label = ttk.Label(search_frame, text="Results")
@@ -183,12 +224,21 @@ class Application(tk.Frame):
                     if node.name is not None and search_string.lower() in node.name.lower():
                         search_nodes.append(node)
                 self.__update_search_view(search_nodes)
-            elif search_type == "Refference":
-#                TODO:implement search by refference
-                self.__update_search_view([])
+            elif search_type == "Autosar Type":
+                search_nodes_TYPE = []
+                for node in self.__asr_explorer_id_to_node_dict.values():
+                    node_type = node.__class__.__name__
+                    if node_type is not None and search_string.lower() in node_type.lower():
+                        search_nodes_TYPE.append(node)
+                self.__update_search_view(search_nodes_TYPE)
             elif search_type == "Regular Expression":
-#                TODO:implement search by refference
-                self.__update_search_view([])
+                search_nodes_RE = []
+                for node in self.__asr_explorer_id_to_node_dict.values():
+                    if node.name is not None:
+                        matched_re = re.search(search_string, node.name)
+                        if matched_re is not None and matched_re.group()!='':
+                            search_nodes_RE.append(node)
+                self.__update_search_view(search_nodes_RE)
         else:
             self.__update_search_view([])
 
@@ -293,10 +343,10 @@ class Application(tk.Frame):
             if self.__property_view.column('#1',width=None) < col_w:
                 self.__property_view.column('#1', width=col_w)
 
-            self.__property_view.insert('', 
-                                        "end", 
+            self.__property_view.insert('',
+                                        "end",
                                         iid=id,
-                                        text=name, 
+                                        text=name,
                                         values=(propertyValue))
             id +=1
 
@@ -310,8 +360,8 @@ class Application(tk.Frame):
         id = 1
         for node in nodes:
             text = str(node)
-            self.__search_view.insert('', 
-                                        "end", 
+            self.__search_view.insert('',
+                                        "end",
                                         iid=id,
                                         text=text)
 
@@ -333,8 +383,8 @@ class Application(tk.Frame):
         id = 1
         for ref in node.referenced_by:
             text = str(ref)
-            self.__referred_by_view.insert('', 
-                                    "end", 
+            self.__referred_by_view.insert('',
+                                    "end",
                                     iid=id,
                                     text=text)
 
@@ -383,16 +433,18 @@ class Application(tk.Frame):
             self.__asr_explorer.column('#1', width=col_w)
         """
 
-        return self.__asr_explorer.insert(parentItem, 
-                                    "end", 
+        return self.__asr_explorer.insert(parentItem,
+                                    "end",
                                     iid=id,
-                                    text=element_text, 
+                                    text=element_text,
                                     values=type_text)
 
 
     def __get_padded_text_width(self, text):
         return self.__font__.measure(text + '__') + (2 * __PAD_X__)
 
+    def client_exit(self, root):
+        root.destroy()
 
 def show_in_ui(autosarRoot):
     win = tk.Tk()
