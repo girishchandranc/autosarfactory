@@ -112,14 +112,16 @@ autosar_ui.show_in_ui(root)
 
 Please see below a screenshot of the visualizer.
 
-![visualizer](https://user-images.githubusercontent.com/31938966/104857295-af979980-5917-11eb-8754-f4e889e76a2f.png)
+![AutosarVisualizer-2021-01-26 130700](https://user-images.githubusercontent.com/55708936/105837616-a1acdd00-5fd7-11eb-92ee-6255ae202749.jpg)
 
 
-The visualizer mainly consists of 4 views.
+The visualizer mainly consists of 4 views and a menu bar.
 - Autosar Explorer - A simple tree which shows all elements in the model.
 - Property view - Info about property and its corresponding values of the selected element in autosar explorer.
 - Referenced by view - This views list elements which references the selected element in autosar explorer.
-- Search view - Provision to search any elements in the model.
+- Search view - Provision to search any elements in the model. The type of search can be selected through a combobox at the top of the view. There are 3 different types of search available: by the element short name, by a regular expression applied to the name of the element or by the Autosar type of the element.
+
+The menu bar allows to switch the theme applied to the application at runtime and to exit the application. (This is planned to be extended with new menu options added in the future).
 
 ## Examples
 Please check the script inside the `Examples` folder which creates a basic communication matrix. 

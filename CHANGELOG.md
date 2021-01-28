@@ -16,3 +16,8 @@ New UI to visualize the Autosar model.
 
 ## [0.2.1]() - 2021-01-24
 Support for processing the integer attributes configured as hex, binary or octal values in arxml file.
+
+## [0.2.2]() - 2021-01-28
+- Small UI improvement - posibility to select search type
+- Implemented multiple type searches (by short name, by Autosar type and by regular expression on name)
+- Added menu bar - implemented theme selection at runtime
