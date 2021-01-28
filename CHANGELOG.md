@@ -13,7 +13,7 @@ New UI to visualize the Autosar model.
 ### Changed
 - New API `get_children()` to get child elements of a particular autosar element
 - New API `get_property_values()` to get values of all attributes of anautosar element.
-## [0.2.1]() - 2021-01-22
+## [0.2.2]() - 2021-01-28
 - Small UI improvement - posibility to select search type
 - Implemented multiple type searches (by short name, by Autosar type and by regular expression on name)
 - Added menu bar - implemented theme selection at runtime

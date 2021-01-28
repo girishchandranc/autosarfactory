@@ -216,35 +216,31 @@ class Application(tk.Frame):
 
     def __on_search_entry_click(self, event):
         search_string = self.__search_field.get()
+        search_nodes = []
+        search_type = self.__search_dropdown.get()
         if search_string == 'search':
             self.__search_field.delete(0, "end") # delete all the text in the entry
             self.__search_field.insert(0, '') #Insert blank for user input
             self.__search_field.config(foreground='black')
         elif search_string != '':
-            search_type = self.__search_dropdown.get()
             if search_type == "Short Name":
-                search_nodes = []
                 for node in self.__asr_explorer_id_to_node_dict.values():
                     if node.name is not None and search_string.lower() in node.name.lower():
                         search_nodes.append(node)
-                self.__update_search_view(search_nodes)
             elif search_type == "Autosar Type":
-                search_nodes_TYPE = []
                 for node in self.__asr_explorer_id_to_node_dict.values():
                     node_type = node.__class__.__name__
                     if node_type is not None and search_string.lower() in node_type.lower():
-                        search_nodes_TYPE.append(node)
-                self.__update_search_view(search_nodes_TYPE)
+                        search_nodes.append(node)
             elif search_type == "Regular Expression":
-                search_nodes_RE = []
                 for node in self.__asr_explorer_id_to_node_dict.values():
                     if node.name is not None:
+                        if search_string=='*' or search_string=='+':
+                            search_string="\{0}".format(search_string)
                         matched_re = re.search(search_string, node.name)
                         if matched_re is not None and matched_re.group()!='':
-                            search_nodes_RE.append(node)
-                self.__update_search_view(search_nodes_RE)
-        else:
-            self.__update_search_view([])
+                            search_nodes.append(node)
+        self.__update_search_view(search_nodes)
 
 
     def __on_search_entry_focusout(self,event):
