@@ -147,6 +147,14 @@ def test_model_read_attributes():
     assert(isinstance(vdp.get_initValue(), autosarfactory.NumericalValueSpecification)), 'init value should be an instance of NumericalValueSpecification'
     assert(vdp.get_initValue().get_value().get() == '1'), 'init value should be 1'
 
+    # check for different types of int values(hex, binary, oct, decimal)
+    filter_node = next(iter(autosarfactory.get_node('/Swcs/asw2/inPort').get_requiredComSpecs())).get_filter()
+    assert (filter_node is not None), 'filter_node should not be None'
+    assert(filter_node.get_mask() == 4095), 'value of mask should be 4095' # hex value in arxml
+    assert(filter_node.get_max() == 15), 'value of max should be 15' # binary value in arxml
+    assert(filter_node.get_min() == 375), 'value of min should be 375' # oct value in arxml
+
+
 def test_model_modify():
     """
     Tests if the elements in the model can be modified
