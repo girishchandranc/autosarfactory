@@ -22,6 +22,7 @@ class Application(tk.Frame):
         self.__search_field = None
         self.__search_view = None
         self.__go_to_menu = None
+        self.__asr_explorer_menu = None
         self.__current_theme = 'scidgreen'
         self.__asr_img = tk.PhotoImage(file=os.path.join(__resourcesDir__, 'autosar.png'))
         self.__initialize_ui()
@@ -33,6 +34,7 @@ class Application(tk.Frame):
         self.__go_to_node_id_in_asr_explorer = None
         self.__font__ = tkFont.nametofont('TkHeadingFont')
         self.__populate_tree(autosar_root)
+
 
     def __selectTheme(self, themeName):
         style = ThemedStyle(self.__root)
@@ -54,6 +56,7 @@ class Application(tk.Frame):
             self.__current_theme='scidgreen'
         style.theme_use(self.__current_theme)
 
+
     def __initialize_ui(self):
         # Configure the root object for the Application
         self.__root.iconphoto(True, self.__asr_img)
@@ -65,31 +68,27 @@ class Application(tk.Frame):
         #print(style.themes)
 #        ['yaru', 'default', 'vista', 'classic', 'scidgreen', 'equilux', 'scidgrey', 'adapta', 'scidpink', 'scidmint', 'plastik', 'alt', 'clearlooks', 'itft1', 'smog', 'clam', 'scidsand', 'kroc', 'radiance', 'black', 'blue', 'arc', 'winxpblue', 'scidblue', 'ubuntu', 'keramik', 'winnative', 'elegance', 'aquativo', 'scidpurple', 'xpnative', 'breeze']
         #style.theme_use("equilux") #- very slow for some reason
-
         style.theme_use(self.__current_theme)
 
         # create ui components
-
         menubar = Menu(self.__root)
         filemenu = Menu(menubar, tearoff=0)
 
         menubar.add_cascade(label="Select Theme", menu=filemenu)
 
-        filemenu.add_command(label="default", command=lambda:self.__selectTheme('default'))
-        filemenu.add_command(label="scidgreen", command=lambda:self.selectTheme('scidgreen'))
-        filemenu.add_command(label="ubuntu", command=lambda:self.__selectTheme('ubuntu'))
-        filemenu.add_command(label="classic", command=lambda:self.__selectTheme('classic'))
-        filemenu.add_command(label="vista", command=lambda:self.__selectTheme('vista'))
-        filemenu.add_command(label="alt", command=lambda:self.__selectTheme('alt'))
-        filemenu.add_command(label="equilux", command=lambda:self.__selectTheme('equilux'))
+        filemenu.add_command(label="Default", command=lambda:self.__selectTheme('default'))
+        filemenu.add_command(label="ScidGreen", command=lambda:self.selectTheme('scidgreen'))
+        filemenu.add_command(label="Ubuntu", command=lambda:self.__selectTheme('ubuntu'))
+        filemenu.add_command(label="Classic", command=lambda:self.__selectTheme('classic'))
+        filemenu.add_command(label="Vista", command=lambda:self.__selectTheme('vista'))
+        filemenu.add_command(label="Alt", command=lambda:self.__selectTheme('alt'))
+        filemenu.add_command(label="Equilux", command=lambda:self.__selectTheme('equilux'))
         self.__root.config(menu=menubar)
 
         menubar.add_command(label="Exit", command=lambda:self.__client_exit(self.__root))
 
         splitter = tk.PanedWindow(orient=tk.VERTICAL)
         top_frame = tk.Frame(splitter)
-
-
 
         # Create the autosar explorer
         self.__asr_explorer = ttk.Treeview(top_frame, columns=('Type'))
@@ -196,6 +195,10 @@ class Application(tk.Frame):
         # create menu items
         self.__go_to_menu = tk.Menu(self.__root, tearoff=0)
         self.__go_to_menu.add_command(label='Go to item', command=self.__go_to_node_in_asr_explorer)
+        self.__asr_explorer_menu = tk.Menu(self.__root, tearoff=0)
+        self.__asr_explorer_menu.add_command(label='Copy Name', command=self.__copy_name_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy Path', command=self.__copy_path_to_clip_board)
+
 
         # bind search entry
         self.__search_field.bind('<FocusIn>', self.__on_search_entry_click)
@@ -212,6 +215,7 @@ class Application(tk.Frame):
         # right-click
         self.__referred_by_view.bind("<Button-3>", self.__on_referred_by_view_right_click)
         self.__property_view.bind("<Button-3>", self.__on__properties_view_right_click)
+        self.__asr_explorer.bind("<Button-3>", self.__on__asr_explorer_right_click)
 
 
     def __on_search_entry_click(self, event):
@@ -263,6 +267,26 @@ class Application(tk.Frame):
         if item != '' and int(item) in self.__property_view_id_to_node_dict:
             self.__go_to_node_id_in_asr_explorer = self.__asr_explorer_node_to_id_dict[self.__property_view_id_to_node_dict[int(item)]]
             self.__go_to_menu.tk_popup(event.x_root, event.y_root, 0)
+
+
+    def __on__asr_explorer_right_click(self,event):
+        # find entry
+        self.__go_to_node_id_in_asr_explorer = self.__asr_explorer.identify('item',event.x,event.y)
+        self.__asr_explorer_menu.tk_popup(event.x_root, event.y_root, 0)
+
+
+    def __copy_name_to_clip_board(self):
+        item = self.__go_to_node_id_in_asr_explorer
+        if item != '' and int(item) in self.__asr_explorer_id_to_node_dict:
+            self.__root.clipboard_clear()
+            self.__root.clipboard_append(self.__asr_explorer_id_to_node_dict[int(item)].name)
+
+
+    def __copy_path_to_clip_board(self):
+        item = self.__go_to_node_id_in_asr_explorer
+        if item != '' and int(item) in self.__asr_explorer_id_to_node_dict:
+            self.__root.clipboard_clear()
+            self.__root.clipboard_append(self.__asr_explorer_id_to_node_dict[int(item)].path)
 
 
     def __go_to_node_in_asr_explorer(self):
