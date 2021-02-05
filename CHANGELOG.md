@@ -21,3 +21,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 - Small UI improvement - posibility to select search type
 - Implemented multiple type searches (by short name, by Autosar type and by regular expression on name)
 - Added menu bar - implemented theme selection at runtime
+
+## [0.2.3]() - 2021-02-04
+- Small UI improvement - possibility to copy `name` and `path` of a node from the autosar explorer to clipboard.
