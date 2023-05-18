@@ -14,10 +14,16 @@ AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arx
 
 ### Reading file
 ```python
+#Read a list of files
 files = ['component.arxml', 'datatypes.arxml']
 root, status = autosarfactory.read(files)
+
+#Read a list of folders
+folders = ['folder1', 'folder2']
+root, status = autosarfactory.read(folders)
+
 ```
-The read method processes the input files and return the root node(with merged info of all the given files). The status gives an info if the file reading was successful.
+The read method processes the input files/folders and return the root node(with merged info of all the files). If folder is provided, the method does a deep search for the arxml files and reads in all the files in the folder. The status gives an info if the file/folder reading was successful.
 
 ### Creating new file
 ```python
