@@ -24,3 +24,8 @@ Support for processing the integer attributes configured as hex, binary or octal
 
 ## [0.2.3]() - 2021-02-04
 - Small UI improvement - possibility to copy `name` and `path` of a node from the autosar explorer to clipboard.
+
+## [0.3.0]() - 2023-05-19
+- Fixed issue with elements not being added to set when the element has no short name(eg: DATA-TYPE-MAP)
+- Added splittable support
+- Now, `autosarfactory` can read list of folders and can deep search for the arxml files.
