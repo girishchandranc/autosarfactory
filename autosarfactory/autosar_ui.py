@@ -432,10 +432,11 @@ class Application(tk.Frame):
 
 
     def __add_child(self, node, parentItem, idCounter):
-        for child in node.get_children():
-            childTree = self.__create_tree_item(child, parentItem, idCounter)
-            # add child nodes
-            self.__add_child(child, childTree, idCounter)
+        if hasattr(node, 'get_children') and callable(getattr(node, 'get_children')):
+            for child in node.get_children():
+                childTree = self.__create_tree_item(child, parentItem, idCounter)
+                # add child nodes
+                self.__add_child(child, childTree, idCounter)
 
 
     def __create_tree_item(self, node, parentItem, idCounter):
