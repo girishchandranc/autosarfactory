@@ -29,3 +29,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 - Fixed issue with elements not being added to set when the element has no short name(eg: DATA-TYPE-MAP)
 - Added splittable support
 - Now, `autosarfactory` can read list of folders and can deep search for the arxml files.
+
+## [0.3.1]() - 2023-07-11
+- Check if the parent node can have children before getting or adding children
