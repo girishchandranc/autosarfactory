@@ -3,6 +3,20 @@ mod_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, mod_path)
 from autosarfactory import autosarfactory
 
+
+def __createCompuScales(compuScales, lowerLimitVal, upperLimitVal, constVal):
+    compuScale = compuScales.new_CompuScale()
+    compuScale.new_CompuScaleConstantContents().new_CompuConst().new_CompuConstTextContent().set_vt(constVal)
+
+    upperLimit = compuScale.new_UpperLimit()
+    upperLimit.set(upperLimitVal)
+    upperLimit.set_intervalType(autosarfactory.IntervalTypeEnum.VALUE_CLOSED)
+
+    lowerLimit = compuScale.new_LowerLimit()
+    lowerLimit.set(lowerLimitVal)
+    lowerLimit.set_intervalType(autosarfactory.IntervalTypeEnum.VALUE_CLOSED)
+
+
 generatdDir = os.path.join(os.path.dirname(__file__), 'generated')
 dataTypesFile = os.path.join(generatdDir, 'dataTypes.arxml')
 interfaceFile = os.path.join(generatdDir, 'interface.arxml')
@@ -13,10 +27,40 @@ mergedFile = os.path.join(generatdDir, 'merged.arxml')
 dtPack = autosarfactory.new_file(dataTypesFile, defaultArPackage = 'DataTypes', overWrite = True)
 baseTypePack = dtPack.new_ARPackage('baseTypes')
 uint8BaseType = baseTypePack.new_SwBaseType('uint8')
+baseTypeDef = uint8BaseType.new_BaseTypeDirectDefinition()
+baseTypeDef.set_baseTypeEncoding('2C')
+baseTypeDef.set_nativeDeclaration('unsigned char')
+baseTypeDef.set_memAlignment(8)
+baseTypeDef.set_baseTypeSize(16)
+
+compuPack = dtPack.new_ARPackage('compuMethods')
+compu1 = compuPack.new_CompuMethod('cm1')
+intoPhy = compu1.new_CompuInternalToPhys()
+compuScales  = intoPhy.new_CompuScales()
+
+__createCompuScales(compuScales=compuScales, lowerLimitVal=0, upperLimitVal=0, constVal='ECU_STATE_STOP')
+__createCompuScales(compuScales=compuScales, lowerLimitVal=1, upperLimitVal=1, constVal='ECU_STATE_START')
+__createCompuScales(compuScales=compuScales, lowerLimitVal=2, upperLimitVal=2, constVal='ECU_STATE_RUN')
+
+dataConstrPack = dtPack.new_ARPackage('dataConstrs')
+dataConstr = dataConstrPack.new_DataConstr('dc1')
+intConstr = dataConstr.new_DataConstrRule().new_InternalConstrs()
+
+dcLowerLimit = intConstr.new_LowerLimit()
+dcLowerLimit.set(-128)
+dcLowerLimit.set_intervalType(autosarfactory.IntervalTypeEnum.VALUE_CLOSED)
+
+dcUpperLimit = intConstr.new_UpperLimit()
+dcUpperLimit.set(127)
+dcUpperLimit.set_intervalType(autosarfactory.IntervalTypeEnum.VALUE_CLOSED)
+
 
 implTypePack = dtPack.new_ARPackage('ImplTypes')
 uint8 = implTypePack.new_ImplementationDataType('uint8')
-uint8.new_SwDataDefProps().new_SwDataDefPropsVariant().set_baseType(uint8BaseType)
+variant = uint8.new_SwDataDefProps().new_SwDataDefPropsVariant()
+variant.set_baseType(uint8BaseType)
+variant.set_compuMethod(compu1)
+variant.set_dataConstr(dataConstr)
 
 ifPack = autosarfactory.new_file(interfaceFile, defaultArPackage = 'Interfaces', overWrite = True)
 srIf = ifPack.new_SenderReceiverInterface('srif1')

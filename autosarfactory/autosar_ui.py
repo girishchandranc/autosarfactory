@@ -196,8 +196,9 @@ class Application(tk.Frame):
         self.__go_to_menu = tk.Menu(self.__root, tearoff=0)
         self.__go_to_menu.add_command(label='Go to item', command=self.__go_to_node_in_asr_explorer)
         self.__asr_explorer_menu = tk.Menu(self.__root, tearoff=0)
-        self.__asr_explorer_menu.add_command(label='Copy Name', command=self.__copy_name_to_clip_board)
-        self.__asr_explorer_menu.add_command(label='Copy Path', command=self.__copy_path_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy ShortName', command=self.__copy_name_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy AutosarPath', command=self.__copy_path_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy FilePath', command=self.__copy_file_path_to_clip_board)
 
 
         # bind search entry
@@ -287,6 +288,13 @@ class Application(tk.Frame):
         if item != '' and int(item) in self.__asr_explorer_id_to_node_dict:
             self.__root.clipboard_clear()
             self.__root.clipboard_append(self.__asr_explorer_id_to_node_dict[int(item)].path)
+
+
+    def __copy_file_path_to_clip_board(self):
+        item = self.__go_to_node_id_in_asr_explorer
+        if item != '' and int(item) in self.__asr_explorer_id_to_node_dict:
+            self.__root.clipboard_clear()
+            self.__root.clipboard_append(self.__asr_explorer_id_to_node_dict[int(item)].file)
 
 
     def __go_to_node_in_asr_explorer(self):

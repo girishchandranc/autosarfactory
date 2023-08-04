@@ -57,7 +57,6 @@
                   <SW-MAPPINGS>
                     <SWC-TO-ECU-MAPPING>
                       <SHORT-NAME>SwcMapping</SHORT-NAME>
-                      <ECU-INSTANCE-REF DEST="ECU-INSTANCE">/Can/ecus/ecu1</ECU-INSTANCE-REF>
                       <COMPONENT-IREFS>
                         <COMPONENT-IREF>
                           <CONTEXT-COMPOSITION-REF DEST="ROOT-SW-COMPOSITION-PROTOTYPE">/Can/system/CanSystem/rootSwcom</CONTEXT-COMPOSITION-REF>
@@ -67,6 +66,7 @@
                           </CONTEXT-COMPONENT-REFS>
                         </COMPONENT-IREF>
                       </COMPONENT-IREFS>
+                      <ECU-INSTANCE-REF DEST="ECU-INSTANCE">/Can/ecus/ecu1</ECU-INSTANCE-REF>
                     </SWC-TO-ECU-MAPPING>
                   </SW-MAPPINGS>
                 </SYSTEM-MAPPING>
