@@ -1,5 +1,6 @@
 import os, sys, shutil
 import pytest, filecmp
+from lxml import etree
 
 mod_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, mod_path)
@@ -408,3 +409,46 @@ def test_model_referenced_by_elements():
     assert (isinstance(ref_by, autosarfactory.PRPortPrototype)), 'should be instance of PRPortPrototype'
     assert (ref_by.name == 'p1'), 'name should be p1'
     assert (ref_by.get_providedRequiredInterface() == csIf), 'interfaces should be same'
+
+
+def test_model_get_all_instances():
+    """
+    Tests if the model returns the right instances when the method get_all_instances is called
+    """
+    root, status = autosarfactory.read(input_files)
+    runnables = autosarfactory.get_all_instances(root, autosarfactory.RunnableEntity)
+    assert (len(runnables) == 2), '2 runnables in the whole model'
+
+    runnables = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)
+    assert (len(runnables) == 1), '1 runnable in the swc asw1'
+
+
+def test_xml_order_elements():
+    """
+    Tests if the elements were added in the right sequence as specified by Autosar
+    """
+    root, status = autosarfactory.read(input_files)
+    runnable = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)[0]
+
+    # attribute CanBeInvokedConcurrently must be added before DataSendPoints
+    runnable.set_canBeInvokedConcurrently(True)
+
+    # Data write access should be added after DataSendPoint and before Symbol
+    dwa = runnable.new_DataWriteAcces('dwa1')
+    var = dwa.new_AccessedVariable().new_AutosarVariable()
+    var.set_portPrototype(autosarfactory.get_node('/Swcs/asw1/outPort'))
+    var.set_targetDataPrototype(autosarfactory.get_node('/Interfaces/srif1/de1'))
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the order of the elements are as expected by schema.
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    runnables = tree.findall(".//{*}RUNNABLE-ENTITY")
+    for run in runnables:
+        if run.find('{*}SHORT-NAME').text == 'Runnable_1':
+            assert (run[0].tag == '{http://autosar.org/schema/r4.0}SHORT-NAME'), 'First child must be SHORT-NAME'
+            assert (run[1].tag == '{http://autosar.org/schema/r4.0}CAN-BE-INVOKED-CONCURRENTLY'), 'Second child must be CAN-BE-INVOKED-CONCURRENTLY'
+            assert (run[2].tag == '{http://autosar.org/schema/r4.0}DATA-SEND-POINTS'), 'Third child must be DATA-SEND-POINTS'
+            assert (run[3].tag == '{http://autosar.org/schema/r4.0}DATA-WRITE-ACCESSS'), 'Fourth child must be DATA-WRITE-ACCESSS'
+            assert (run[4].tag == '{http://autosar.org/schema/r4.0}SYMBOL'), 'Last child must be SYMBOL'
+            break

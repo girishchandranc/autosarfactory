@@ -25,7 +25,6 @@
               <RUNNABLES>
                 <RUNNABLE-ENTITY>
                   <SHORT-NAME>Runnable_1</SHORT-NAME>
-                  <SYMBOL>Run1</SYMBOL>
                   <DATA-SEND-POINTS>
                     <VARIABLE-ACCESS>
                       <SHORT-NAME>dsp</SHORT-NAME>
@@ -37,6 +36,7 @@
                       </ACCESSED-VARIABLE>
                     </VARIABLE-ACCESS>
                   </DATA-SEND-POINTS>
+                  <SYMBOL>Run1</SYMBOL>
                 </RUNNABLE-ENTITY>
               </RUNNABLES>
             </SWC-INTERNAL-BEHAVIOR>
