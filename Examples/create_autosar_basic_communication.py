@@ -124,15 +124,18 @@ canNetworkPack = autosarfactory.new_file(canNetworkFile, defaultArPackage = 'Can
 signalsPack = canNetworkPack.new_ARPackage('signals')
 systemsignalsPack = canNetworkPack.new_ARPackage('systemsignals')
 syssig1 = systemsignalsPack.new_SystemSignal('syssig1')
+syssig1.set_dynamicLength(True)
 
 sig1 = signalsPack.new_ISignal('sig1')
+sig1.set_systemSignal(syssig1)
 sig1.set_length(4)
 sig1.set_dataTypePolicy(autosarfactory.DataTypePolicyEnum.VALUE_LEGACY)
 sig1.set_iSignalType(autosarfactory.ISignalTypeEnum.VALUE_PRIMITIVE)
-sig1.set_systemSignal(syssig1)
 
 ecuPack = canNetworkPack.new_ARPackage('ecus')
 ecu1 = ecuPack.new_EcuInstance('ecu1')
+ecu1.set_wakeUpOverBusSupported(True)
+ecu1.set_sleepModeSupported(False)
 
 sysPack = canNetworkPack.new_ARPackage('system')
 system = sysPack.new_System('CanSystem')
