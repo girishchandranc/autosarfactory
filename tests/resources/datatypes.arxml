@@ -9,6 +9,7 @@
           <ELEMENTS>
             <SW-BASE-TYPE>
               <SHORT-NAME>uint8</SHORT-NAME>
+              <MEM-ALIGNMENT>8</MEM-ALIGNMENT>
             </SW-BASE-TYPE>
           </ELEMENTS>
         </AR-PACKAGE>

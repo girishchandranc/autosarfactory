@@ -427,10 +427,12 @@ def test_xml_order_elements():
     """
     Tests if the elements were added in the right sequence as specified by Autosar
     """
-    root, status = autosarfactory.read(input_files)
+    autosarfactory.read(input_files)
     runnable = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)[0]
 
-    # attribute CanBeInvokedConcurrently must be added before DataSendPoints
+    # Runnable just contains the elements ShortName, DataSendPoints initially 
+
+    # attribute CanBeInvokedConcurrently must be added after ShortName and before DataSendPoints
     runnable.set_canBeInvokedConcurrently(True)
 
     # Data write access should be added after DataSendPoint and before Symbol
@@ -452,3 +454,38 @@ def test_xml_order_elements():
             assert (run[3].tag == '{http://autosar.org/schema/r4.0}DATA-WRITE-ACCESSS'), 'Fourth child must be DATA-WRITE-ACCESSS'
             assert (run[4].tag == '{http://autosar.org/schema/r4.0}SYMBOL'), 'Last child must be SYMBOL'
             break
+
+def test_xml_order_elements_with_invisible_model_element():
+    """
+    Tests if the elements were added in the right sequence as specified by Autosar when the model elements doesn't appear in arxml
+    """
+    autosarfactory.read(input_files)
+    uint8BaseType = autosarfactory.get_node('/DataTypes/baseTypes/uint8')
+
+    # uint8 base type just contains the child elements shortName and MemAlignment
+
+    baseTypeDef = uint8BaseType.new_BaseTypeDirectDefinition() # create the invisible model element BaseTypeDirectDefinition
+
+    # BaseTypeEncoding should be added after ShortName and before MemAlignment
+    baseTypeDef.set_baseTypeEncoding('2C')
+
+    # NativeDeclaration should be added after MemAlignment
+    baseTypeDef.set_nativeDeclaration('unsigned char')
+
+    # BaseTypeSize should be added after ShortName and before BaseTypeEncoding and MemAlignment
+    baseTypeDef.set_baseTypeSize(8)
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the order of the elements are as expected by schema.
+    tree = etree.parse(os.path.join(resourcesDir, 'datatypes.arxml'), etree.XMLParser(remove_blank_text=True))
+    baseTypeFromFile = tree.findall(".//{*}SW-BASE-TYPE")[0]
+
+    assert (baseTypeFromFile[0].tag == '{http://autosar.org/schema/r4.0}SHORT-NAME'), 'First child must be SHORT-NAME'
+    assert (baseTypeFromFile[1].tag == '{http://autosar.org/schema/r4.0}BASE-TYPE-SIZE'), 'Second child must be BASE-TYPE-SIZE'
+    assert (baseTypeFromFile[1].text == '8'), 'Value must be 8'
+    assert (baseTypeFromFile[2].tag == '{http://autosar.org/schema/r4.0}BASE-TYPE-ENCODING'), 'Third child must be BASE-TYPE-ENCODING'
+    assert (baseTypeFromFile[2].text == '2C'), 'Value must be 2C'
+    assert (baseTypeFromFile[3].tag == '{http://autosar.org/schema/r4.0}MEM-ALIGNMENT'), 'Fourth child must be MEM-ALIGNMENT'
+    assert (baseTypeFromFile[4].tag == '{http://autosar.org/schema/r4.0}NATIVE-DECLARATION'), 'Last child must be NATIVE-DECLARATION'
+    assert (baseTypeFromFile[4].text == 'unsigned char'), 'Value must be unsigned char'
