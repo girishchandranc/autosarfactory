@@ -430,7 +430,7 @@ def test_xml_order_elements():
     autosarfactory.read(input_files)
     runnable = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)[0]
 
-    # Runnable just contains the elements ShortName, DataSendPoints initially 
+    # Runnable just contains the elements DataSendPoints and Symbol initially 
 
     # attribute CanBeInvokedConcurrently must be added after ShortName and before DataSendPoints
     runnable.set_canBeInvokedConcurrently(True)
@@ -441,13 +441,16 @@ def test_xml_order_elements():
     var.set_portPrototype(autosarfactory.get_node('/Swcs/asw1/outPort'))
     var.set_targetDataPrototype(autosarfactory.get_node('/Interfaces/srif1/de1'))
 
+    # Short name must be added as the first element
+    runnable.set_shortName("run1")
+
     autosarfactory.save()
 
     # Read saved xml manually and see if the order of the elements are as expected by schema.
     tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
     runnables = tree.findall(".//{*}RUNNABLE-ENTITY")
     for run in runnables:
-        if run.find('{*}SHORT-NAME').text == 'Runnable_1':
+        if run.find('{*}SHORT-NAME').text == 'run1':
             assert (run[0].tag == '{http://autosar.org/schema/r4.0}SHORT-NAME'), 'First child must be SHORT-NAME'
             assert (run[1].tag == '{http://autosar.org/schema/r4.0}CAN-BE-INVOKED-CONCURRENTLY'), 'Second child must be CAN-BE-INVOKED-CONCURRENTLY'
             assert (run[2].tag == '{http://autosar.org/schema/r4.0}DATA-SEND-POINTS'), 'Third child must be DATA-SEND-POINTS'

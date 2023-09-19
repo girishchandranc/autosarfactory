@@ -24,7 +24,6 @@
               </EVENTS>
               <RUNNABLES>
                 <RUNNABLE-ENTITY>
-                  <SHORT-NAME>Runnable_1</SHORT-NAME>
                   <DATA-SEND-POINTS>
                     <VARIABLE-ACCESS>
                       <SHORT-NAME>dsp</SHORT-NAME>
