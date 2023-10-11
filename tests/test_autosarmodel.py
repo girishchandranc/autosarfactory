@@ -492,3 +492,29 @@ def test_xml_order_elements_with_invisible_model_element():
     assert (baseTypeFromFile[3].tag == '{http://autosar.org/schema/r4.0}MEM-ALIGNMENT'), 'Fourth child must be MEM-ALIGNMENT'
     assert (baseTypeFromFile[4].tag == '{http://autosar.org/schema/r4.0}NATIVE-DECLARATION'), 'Last child must be NATIVE-DECLARATION'
     assert (baseTypeFromFile[4].text == 'unsigned char'), 'Value must be unsigned char'
+
+def test_xml_element_removed_when_value_is_unset():
+    """
+    Tests if the xml elements are removed when the value for the attribute or reference is unset or set to None.
+    """
+    autosarfactory.read(input_files)
+    
+    runnable = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)[0]
+    # Runnable contains the Symbol and we are trying to unset it.
+    assert (runnable.get_symbol() is not None), 'symbol should not be None'
+    runnable.set_symbol(None)
+    
+    dre = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw2'), autosarfactory.DataReceivedEvent)[0]
+    # Timing Event has a reference to runnable. We are trying to unset it.
+    assert (dre.get_startOnEvent() is not None), 'runnable reference should not be None'
+    dre.set_startOnEvent(None)
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the symbol attribute and runnable reference are removed
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    runnableFromXmlfile = tree.findall(".//{*}RUNNABLE-ENTITY")[0]
+    assert(runnableFromXmlfile.find('{*}SYMBOL') is None), 'SYMBOL element should not exist'
+
+    dreFromXmlfile = tree.findall(".//{*}DATA-RECEIVED-EVENT")[0]
+    assert(dreFromXmlfile.find('{*}START-ON-EVENT-REF') is None), 'START-ON-EVENT-REF element should not exist'
