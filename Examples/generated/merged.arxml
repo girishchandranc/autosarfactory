@@ -48,6 +48,22 @@
                 </COMPU-SCALES>
               </COMPU-INTERNAL-TO-PHYS>
             </COMPU-METHOD>
+            <COMPU-METHOD>
+              <SHORT-NAME>cm2</SHORT-NAME>
+              <COMPU-INTERNAL-TO-PHYS>
+                <COMPU-SCALES>
+                  <COMPU-SCALE>
+                    <COMPU-RATIONAL-COEFFS>
+                      <COMPU-NUMERATOR>
+                        <V>100</V>
+                        <V>200</V>
+                        <V>300</V>
+                      </COMPU-NUMERATOR>
+                    </COMPU-RATIONAL-COEFFS>
+                  </COMPU-SCALE>
+                </COMPU-SCALES>
+              </COMPU-INTERNAL-TO-PHYS>
+            </COMPU-METHOD>
           </ELEMENTS>
         </AR-PACKAGE>
         <AR-PACKAGE>
@@ -272,10 +288,9 @@
                       <COMPONENT-IREFS>
                         <COMPONENT-IREF>
                           <CONTEXT-COMPOSITION-REF DEST="ROOT-SW-COMPOSITION-PROTOTYPE">/Can/system/CanSystem/rootSwcom</CONTEXT-COMPOSITION-REF>
-                          <CONTEXT-COMPONENT-REFS>
-                            <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</CONTEXT-COMPONENT-REF>
-                            <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw2_proto</CONTEXT-COMPONENT-REF>
-                          </CONTEXT-COMPONENT-REFS>
+                          <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</CONTEXT-COMPONENT-REF>
+                          <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw2_proto</CONTEXT-COMPONENT-REF>
+                          <TARGET-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</TARGET-COMPONENT-REF>
                         </COMPONENT-IREF>
                       </COMPONENT-IREFS>
                       <ECU-INSTANCE-REF DEST="ECU-INSTANCE">/Can/ecus/ecu1</ECU-INSTANCE-REF>

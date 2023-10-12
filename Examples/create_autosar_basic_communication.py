@@ -42,6 +42,14 @@ __createCompuScales(compuScales=compuScales, lowerLimitVal=0, upperLimitVal=0, c
 __createCompuScales(compuScales=compuScales, lowerLimitVal=1, upperLimitVal=1, constVal='ECU_STATE_START')
 __createCompuScales(compuScales=compuScales, lowerLimitVal=2, upperLimitVal=2, constVal='ECU_STATE_RUN')
 
+# Create a compu method for rational coeffs
+compu2 = compuPack.new_CompuMethod('cm2')
+rationalCoeff = compu2.new_CompuInternalToPhys().new_CompuScales().new_CompuScale().new_CompuScaleRationalFormula().new_CompuRationalCoeffs()
+num = rationalCoeff.new_CompuNumerator()
+num.new_V().set(100)
+num.new_V().set(200)
+num.new_V().set(300)
+
 dataConstrPack = dtPack.new_ARPackage('dataConstrs')
 dataConstr = dataConstrPack.new_DataConstr('dc1')
 intConstr = dataConstr.new_DataConstrRule().new_InternalConstrs()
@@ -155,6 +163,7 @@ swcMap1 = swctoEcuMp.new_Component()
 swcMap1.set_contextComposition(rootComp)
 swcMap1.add_contextComponent(asw1_proto)
 swcMap1.add_contextComponent(asw2_proto)
+swcMap1.set_targetComponent(asw1_proto)
 
 autosarfactory.save()
 autosarfactory.saveAs(mergedFile, overWrite = True)
