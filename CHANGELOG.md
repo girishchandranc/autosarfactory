@@ -33,6 +33,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.3.1]() - 2023-07-11
 - Check if the parent node can have children before getting or adding children
 
-## [0.4.0]() - 2023-10-11
-- Xml elements are now added respecting the sequence order specified by Autosar schema.
+## [0.4.0]() - 2023-10-12
+- ARXML elements are now added respecting the sequence order specified by Autosar schema.
 - Introduced new API `get_all_instances` to get all the instances of a particular node based on the given class type.
