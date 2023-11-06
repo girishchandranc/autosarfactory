@@ -518,3 +518,17 @@ def test_xml_element_removed_when_value_is_unset():
 
     dreFromXmlfile = tree.findall(".//{*}DATA-RECEIVED-EVENT")[0]
     assert(dreFromXmlfile.find('{*}START-ON-EVENT-REF') is None), 'START-ON-EVENT-REF element should not exist'
+
+def test_read_choice_elements():
+    """
+    Tests if the autosarfactory was able to read choice elements properly from the input model. For eg: SD element inside SDG
+    """
+    autosarfactory.read(input_files)
+    port = autosarfactory.get_node('/Swcs/asw1/outPort')
+
+    # Read SpecialDataGroups
+    sdgs = port.get_adminData().get_sdgs()
+    assert (len(sdgs) == 2), '2 SDG'
+    sdg = next(iter(sdgs))
+    assert (sdg.get_gid() == 'my_id'), 'GID should be my_id'
+    assert (next(iter(sdg.get_sds())).get_value() == 'version-1234'), 'SD value should be version-1234'

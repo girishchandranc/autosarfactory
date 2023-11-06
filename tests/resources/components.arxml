@@ -9,6 +9,16 @@
           <PORTS>
             <P-PORT-PROTOTYPE>
               <SHORT-NAME>outPort</SHORT-NAME>
+              <ADMIN-DATA>
+                <SDGS>
+                  <SDG GID="my_id">
+                    <SD>version-1234</SD>
+                  </SDG>
+                  <SDG GID="my_id_2">
+                    <SD>version-5678</SD>
+                  </SDG>
+                </SDGS>
+              </ADMIN-DATA>
               <PROVIDED-INTERFACE-TREF DEST="SENDER-RECEIVER-INTERFACE">/Interfaces/srif1</PROVIDED-INTERFACE-TREF>
             </P-PORT-PROTOTYPE>
           </PORTS>

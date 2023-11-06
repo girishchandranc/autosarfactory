@@ -140,6 +140,11 @@ sig1.set_length(4)
 sig1.set_dataTypePolicy(autosarfactory.DataTypePolicyEnum.VALUE_LEGACY)
 sig1.set_iSignalType(autosarfactory.ISignalTypeEnum.VALUE_PRIMITIVE)
 
+# Adding admin data
+sdg = sig1.new_AdminData().new_Sdg()
+sdg.set_gid("12")
+sdg.new_Sd().set_value("new_sd")
+
 ecuPack = canNetworkPack.new_ARPackage('ecus')
 ecu1 = ecuPack.new_EcuInstance('ecu1')
 ecu1.set_wakeUpOverBusSupported(True)

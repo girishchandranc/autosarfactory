@@ -239,6 +239,13 @@
           <ELEMENTS>
             <I-SIGNAL>
               <SHORT-NAME>sig1</SHORT-NAME>
+              <ADMIN-DATA>
+                <SDGS>
+                  <SDG GID="12">
+                    <SD>new_sd</SD>
+                  </SDG>
+                </SDGS>
+              </ADMIN-DATA>
               <DATA-TYPE-POLICY>LEGACY</DATA-TYPE-POLICY>
               <I-SIGNAL-TYPE>PRIMITIVE</I-SIGNAL-TYPE>
               <LENGTH>4</LENGTH>
