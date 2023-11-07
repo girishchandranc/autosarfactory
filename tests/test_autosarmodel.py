@@ -532,3 +532,21 @@ def test_read_choice_elements():
     sdg = next(iter(sdgs))
     assert (sdg.get_gid() == 'my_id'), 'GID should be my_id'
     assert (next(iter(sdg.get_sds())).get_value() == 'version-1234'), 'SD value should be version-1234'
+
+def test_model_remove_element():
+    """
+    Tests if the elements are removed from the model
+    """
+    autosarfactory.read(input_files)
+
+    # check removal of containment elements
+    package = autosarfactory.get_node('/Swcs')
+    swc = autosarfactory.get_node('/Swcs/asw1')
+    package.remove_element(swc)
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the element is removed
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
+    for swc in swcFromXmlFile:
+        assert(swc.find('{*}SHORT-NAME') is not 'asw1'), 'swc with name asw1 must not exist as its removed'
