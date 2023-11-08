@@ -170,5 +170,19 @@ swcMap1.add_contextComponent(asw1_proto)
 swcMap1.add_contextComponent(asw2_proto)
 swcMap1.set_targetComponent(asw1_proto)
 
+typesPackage = autosarfactory.new_file(os.path.join(generatdDir, 'array.arxml'), defaultArPackage='types', overWrite=True)
+
+stdImplementationDataType = typesPackage.new_StdCppImplementationDataType('Array')
+
+symbolProps = stdImplementationDataType.new_Namespace('namespace_ns')
+symbolProps.set_symbol('ns')
+
+cppTemplateArgument = stdImplementationDataType.new_TemplateArgument()
+
+positiveIntegerValueVariationPoint = stdImplementationDataType.new_ArraySize()
+positiveIntegerValueVariationPoint.set(6)
+stdImplementationDataType.set_category('ARRAY')
+stdImplementationDataType.set_typeEmitter('TYPE_EMITTER_ARA')
+
 autosarfactory.save()
 autosarfactory.saveAs(mergedFile, overWrite = True)
