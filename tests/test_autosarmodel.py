@@ -549,4 +549,37 @@ def test_model_remove_element():
     tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
     swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
     for swc in swcFromXmlFile:
-        assert(swc.find('{*}SHORT-NAME') is not 'asw1'), 'swc with name asw1 must not exist as its removed'
+        assert(swc.find('{*}SHORT-NAME').text != 'asw1'), 'swc with name asw1 must not exist as its removed'
+
+def test_model_export():
+    """
+    Tests if an element is exported to a file
+    """
+    autosarfactory.read(input_files)
+
+    # 1. export function per node
+    swc = autosarfactory.get_node('/Swcs/Swcs_hierarchy1/Swcs_hierarchy2/asw123')
+    swc.export_to_file(os.path.join(resourcesDir, 'asw123Export.arxml'), overWrite = True)
+
+    # 2. generic export function on the autosarfactory
+    implPack = autosarfactory.get_node('/DataTypes/ImplTypes')
+    autosarfactory.export_to_file(implPack, os.path.join(resourcesDir, 'ImplTypesExport.arxml'), overWrite = True)
+
+    # exception if un-intended element is called for export.
+    port = autosarfactory.get_node('/Swcs/asw1/outPort')
+    with pytest.raises(Exception) as cm:
+        autosarfactory.export_to_file(port, os.path.join(resourcesDir, 'portExport.arxml'), overWrite = True)
+        assert ('Only elements of type CollectableElement can be exported(for eg: ARPackage, ApplicationSwComponentType, ISignal etc etc.)' == str(cm.exception)) 
+
+    # Read the exported file in 1 and 2 and see if the contents exist
+    # 1
+    tree = etree.parse(os.path.join(resourcesDir, 'asw123Export.arxml'), etree.XMLParser(remove_blank_text=True))
+    swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
+    assert(len(swcFromXmlFile) == 1), 'only one swc exists'
+    assert(swcFromXmlFile[0].find('{*}SHORT-NAME').text == 'asw123'), 'name of swc must be asw123'
+
+    #2
+    tree = etree.parse(os.path.join(resourcesDir, 'ImplTypesExport.arxml'), etree.XMLParser(remove_blank_text=True))
+    ImplFromXmlFile = tree.findall(".//{*}IMPLEMENTATION-DATA-TYPE")
+    assert(len(ImplFromXmlFile) == 1), 'only one IDT exists'
+    assert(ImplFromXmlFile[0].find('{*}SHORT-NAME').text == 'uint8'), 'name of IDT must be uint8'
