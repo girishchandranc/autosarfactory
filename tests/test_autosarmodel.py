@@ -11,7 +11,8 @@ resourcesDir = os.path.join(os.path.dirname(__file__), 'resources')
 
 input_files = [os.path.join(resourcesDir, 'components.arxml'), 
                os.path.join(resourcesDir, 'datatypes.arxml'),
-               os.path.join(resourcesDir, 'interfaces.arxml')]
+               os.path.join(resourcesDir, 'interfaces.arxml'),
+               os.path.join(resourcesDir, 'diag_sw_mapping.arxml')]
 
 invalid_files = [os.path.join(resourcesDir, 'invalid.arxml')]
 
@@ -59,7 +60,7 @@ def test_model_access():
     """
     root, status = autosarfactory.read(input_files)
     assert (root is not None), 'root should not be None'
-    assert (len(root.get_arPackages()) == 3), '3 Ar-packages expected'
+    assert (len(root.get_arPackages()) == 4), '4 Ar-packages expected'
     
     swcPackage = next((x for x in root.get_arPackages() if x.name == 'Swcs'), None)
     assert (swcPackage is not None), 'swcPackage should not be None'
@@ -105,6 +106,14 @@ def test_model_path():
     assert (vdp is not None), 'vdp should not be None'
     assert(isinstance(vdp, autosarfactory.VariableDataPrototype)), 'vdp should be an instance of VariableDataPrototype'
     assert (vdp.name == 'de1'), 'name should be de1'
+
+    dswm = autosarfactory.get_node('/RootPackage/map1')
+    diagDE = dswm.get_diagnosticDataElement()
+    assert (diagDE is not None), 'diagDE should not be None'
+    assert (diagDE.autosar_path == '/RootPackage/Record1/element1'), 'diagDE path is /RootPackage/Record1/element1'
+
+    teardown()
+
 
 def test_model_reference():
     """
@@ -154,6 +163,7 @@ def test_model_read_attributes():
     assert(filter_node.get_mask() == 4095), 'value of mask should be 4095' # hex value in arxml
     assert(filter_node.get_max() == 15), 'value of max should be 15' # binary value in arxml
     assert(filter_node.get_min() == 375), 'value of min should be 375' # oct value in arxml
+    teardown()
 
 
 def test_model_modify():
@@ -166,6 +176,7 @@ def test_model_modify():
     assert(te.get_period() == 0.005), 'value of period should be 0.005'
     te.set_period(2000)
     assert(te.get_period() == 2000), 'value of period should be 2000'
+    teardown()
 
 def test_model_create_entity():
     """
@@ -198,7 +209,6 @@ def test_model_create_entity():
     assert(argument.name == 'arg1'), 'name should be arg1'
     assert(isinstance(argument.get_type(), autosarfactory.ImplementationDataType)), 'type should be ImplementationDataType'
     assert(argument.get_type().path == '/DataTypes/ImplTypes/uint8'), 'path of type should be /DataTypes/ImplTypes/uint8'
-
     teardown()
 
 
@@ -409,6 +419,7 @@ def test_model_referenced_by_elements():
     assert (isinstance(ref_by, autosarfactory.PRPortPrototype)), 'should be instance of PRPortPrototype'
     assert (ref_by.name == 'p1'), 'name should be p1'
     assert (ref_by.get_providedRequiredInterface() == csIf), 'interfaces should be same'
+    teardown()
 
 
 def test_model_get_all_instances():
@@ -421,6 +432,7 @@ def test_model_get_all_instances():
 
     runnables = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)
     assert (len(runnables) == 1), '1 runnable in the swc asw1'
+    teardown()
 
 
 def test_xml_order_elements():
@@ -457,6 +469,7 @@ def test_xml_order_elements():
             assert (run[3].tag == '{http://autosar.org/schema/r4.0}DATA-WRITE-ACCESSS'), 'Fourth child must be DATA-WRITE-ACCESSS'
             assert (run[4].tag == '{http://autosar.org/schema/r4.0}SYMBOL'), 'Last child must be SYMBOL'
             break
+    teardown()
 
 def test_xml_order_elements_with_invisible_model_element():
     """
@@ -493,6 +506,8 @@ def test_xml_order_elements_with_invisible_model_element():
     assert (baseTypeFromFile[4].tag == '{http://autosar.org/schema/r4.0}NATIVE-DECLARATION'), 'Last child must be NATIVE-DECLARATION'
     assert (baseTypeFromFile[4].text == 'unsigned char'), 'Value must be unsigned char'
 
+    teardown()
+
 def test_xml_element_removed_when_value_is_unset():
     """
     Tests if the xml elements are removed when the value for the attribute or reference is unset or set to None.
@@ -519,6 +534,8 @@ def test_xml_element_removed_when_value_is_unset():
     dreFromXmlfile = tree.findall(".//{*}DATA-RECEIVED-EVENT")[0]
     assert(dreFromXmlfile.find('{*}START-ON-EVENT-REF') is None), 'START-ON-EVENT-REF element should not exist'
 
+    teardown()
+
 def test_read_choice_elements():
     """
     Tests if the autosarfactory was able to read choice elements properly from the input model. For eg: SD element inside SDG
@@ -532,6 +549,8 @@ def test_read_choice_elements():
     sdg = next(iter(sdgs))
     assert (sdg.get_gid() == 'my_id'), 'GID should be my_id'
     assert (next(iter(sdg.get_sds())).get_value() == 'version-1234'), 'SD value should be version-1234'
+
+    teardown()
 
 def test_model_remove_element():
     """
@@ -550,6 +569,8 @@ def test_model_remove_element():
     swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
     for swc in swcFromXmlFile:
         assert(swc.find('{*}SHORT-NAME').text != 'asw1'), 'swc with name asw1 must not exist as its removed'
+    
+    teardown()
 
 def test_model_export():
     """
@@ -583,3 +604,36 @@ def test_model_export():
     ImplFromXmlFile = tree.findall(".//{*}IMPLEMENTATION-DATA-TYPE")
     assert(len(ImplFromXmlFile) == 1), 'only one IDT exists'
     assert(ImplFromXmlFile[0].find('{*}SHORT-NAME').text == 'uint8'), 'name of IDT must be uint8'
+
+    teardown()
+
+def test_model_path_reference_with_parent_having_no_short_name():
+    """
+    Tests if the reference path is properly set if the element has a parent with no short name.
+    """
+    autosarfactory.read(input_files)
+
+    # Referencing an element whose parent node doesn't have a short-name
+    map1 = autosarfactory.get_node('/RootPackage/map1')
+    map2 = map1.get_parent().new_DiagnosticServiceSwMapping('map2')
+    # here the recordElement do not have a short-name
+    dataElement2 = map1.get_parent().new_DiagnosticExtendedDataRecord('record2').new_RecordElement().new_DataElement('element2')
+    map2.set_diagnosticDataElement(dataElement2)
+    
+    autosarfactory.save()
+    teardown()
+
+    # Read saved xml manually and see if the element is removed
+    tree = etree.parse(os.path.join(resourcesDir, 'diag_sw_mapping.arxml'), etree.XMLParser(remove_blank_text=True))
+    diagSwMappings = tree.findall(".//{*}DIAGNOSTIC-SERVICE-SW-MAPPING")
+    for diag in diagSwMappings:
+        if (diag.find('{*}SHORT-NAME').text == 'map1'):
+            assert(diag.find('{*}DIAGNOSTIC-DATA-ELEMENT-REF').text != '/RootPackage/record2/element2'), 'reference path must be /RootPackage/record2/element2'
+            break
+    
+    # Re-read the saved model and see if the reference node is read properly.
+    autosarfactory.read(input_files)
+    map1 = autosarfactory.get_node('/RootPackage/map2')
+    diagDE = map1.get_diagnosticDataElement()
+    assert (diagDE is not None), 'diagDE should not be None'
+    assert (diagDE.autosar_path == '/RootPackage/record2/element2'), 'diagDE path must be /RootPackage/record2/element2'

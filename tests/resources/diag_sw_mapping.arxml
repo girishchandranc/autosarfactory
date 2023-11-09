@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<AUTOSAR xmlns="http://autosar.org/schema/r4.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://autosar.org/schema/r4.0 AUTOSAR_00051.xsd">
+  <AR-PACKAGES>
+    <AR-PACKAGE>
+      <SHORT-NAME>RootPackage</SHORT-NAME>
+      <ELEMENTS>
+        <DIAGNOSTIC-EXTENDED-DATA-RECORD>
+          <SHORT-NAME>Record1</SHORT-NAME>
+          <RECORD-ELEMENTS>
+            <DIAGNOSTIC-PARAMETER>
+              <BIT-OFFSET>0</BIT-OFFSET>
+              <DATA-ELEMENTS>
+                <DIAGNOSTIC-DATA-ELEMENT>
+                  <SHORT-NAME>element1</SHORT-NAME>
+                </DIAGNOSTIC-DATA-ELEMENT>
+              </DATA-ELEMENTS>
+            </DIAGNOSTIC-PARAMETER>
+          </RECORD-ELEMENTS>
+        </DIAGNOSTIC-EXTENDED-DATA-RECORD>
+        <DIAGNOSTIC-SERVICE-SW-MAPPING>
+          <SHORT-NAME>map1</SHORT-NAME>
+          <DIAGNOSTIC-DATA-ELEMENT-REF DEST="DIAGNOSTIC-DATA-ELEMENT">/RootPackage/Record1/element1</DIAGNOSTIC-DATA-ELEMENT-REF>
+        </DIAGNOSTIC-SERVICE-SW-MAPPING>
+      </ELEMENTS>
+    </AR-PACKAGE>
+  </AR-PACKAGES>
+</AUTOSAR>
