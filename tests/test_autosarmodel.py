@@ -627,8 +627,8 @@ def test_model_path_reference_with_parent_having_no_short_name():
     tree = etree.parse(os.path.join(resourcesDir, 'diag_sw_mapping.arxml'), etree.XMLParser(remove_blank_text=True))
     diagSwMappings = tree.findall(".//{*}DIAGNOSTIC-SERVICE-SW-MAPPING")
     for diag in diagSwMappings:
-        if (diag.find('{*}SHORT-NAME').text == 'map1'):
-            assert(diag.find('{*}DIAGNOSTIC-DATA-ELEMENT-REF').text != '/RootPackage/record2/element2'), 'reference path must be /RootPackage/record2/element2'
+        if (diag.find('{*}SHORT-NAME').text == 'map2'):
+            assert(diag.find('{*}DIAGNOSTIC-DATA-ELEMENT-REF').text == '/RootPackage/record2/element2'), 'reference path must be /RootPackage/record2/element2'
             break
     
     # Re-read the saved model and see if the reference node is read properly.
