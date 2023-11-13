@@ -5,7 +5,7 @@ import tkinter.font as tkFont
 import re
 import os,itertools
 from ttkthemes import ThemedStyle
-from .autosarfactory import Referrable
+from .autosarfactory import Referrable, EcucParameterValue, EcucAbstractReferenceValue
 from tkinter import Menu
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
@@ -452,9 +452,18 @@ class Application(tk.Frame):
         self.__asr_explorer_id_to_node_dict[id] = node
         self.__asr_explorer_node_to_id_dict[node] = id
 
-        element_text = node.name if node.name is not None else node.__class__.__name__
-        type_text = str(node)
+        if node.name is not None:
+            element_text = node.name
+        elif isinstance(node, EcucParameterValue) or isinstance(node, EcucAbstractReferenceValue):
+            defRef = node._node.find('{*}DEFINITION-REF')
+            if defRef is not None and defRef.text != '' and '/' in defRef.text:
+                element_text = defRef.text.split("/")[-1]
+            else:
+                element_text = node.__class__.__name__
+        else:
+            element_text = node.__class__.__name__
 
+        type_text = str(node)
         """
         # adjust column's width if necessary to fit each value
         col_w = self.__get_padded_text_width(element_text)
