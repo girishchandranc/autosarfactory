@@ -64,7 +64,7 @@ def test_model_access():
     
     swcPackage = next((x for x in root.get_arPackages() if x.name == 'Swcs'), None)
     assert (swcPackage is not None), 'swcPackage should not be None'
-    assert (len(swcPackage.get_elements()) == 3), '3 elements expected'
+    assert (len(swcPackage.get_elements()) == 4), '4 elements expected'
 
     asw1 = next((x for x in swcPackage.get_elements() if x.name == 'asw1'), None)
     asw2 = next((x for x in swcPackage.get_elements() if x.name == 'asw2'), None)
@@ -562,6 +562,17 @@ def test_model_remove_element():
     package = autosarfactory.get_node('/Swcs')
     swc = autosarfactory.get_node('/Swcs/asw1')
     package.remove_element(swc)
+
+    # check removal of referenced elements
+    swcEcuMapping = autosarfactory.get_node('/Swcs/CanSystem/Mappings/SwcMapping')
+    swcProto = autosarfactory.get_node('/Swcs/Comp/asw1_proto')
+    assert (isinstance(swcEcuMapping, autosarfactory.SwcToEcuMapping)), 'should be instance of SwcToEcuMapping'
+    assert (len(swcEcuMapping.get_components()) == 1), 'should be one instance of component'
+    assert (isinstance(swcProto, autosarfactory.SwComponentPrototype)), 'should be instance of SwComponentPrototype'
+    swcEcuMapping.get_components()[0].remove_contextComponent(swcProto)
+    assert (len(swcEcuMapping.get_components()[0].get_contextComponents()) == 1), 'only 1 component exists after removing the asw1'
+    assert (swcEcuMapping.get_components()[0].get_contextComponents()[0].name == 'asw2_proto'), 'name should be asw2_proto'
+
     autosarfactory.save()
 
     # Read saved xml manually and see if the element is removed
@@ -569,6 +580,10 @@ def test_model_remove_element():
     swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
     for swc in swcFromXmlFile:
         assert(swc.find('{*}SHORT-NAME').text != 'asw1'), 'swc with name asw1 must not exist as its removed'
+
+    contextComponentRefs = tree.findall(".//{*}COMPONENT-IREF")[0].findall(".//{*}CONTEXT-COMPONENT-REF")
+    assert (len(contextComponentRefs) == 1), 'should be one instance of CONTEXT-COMPONENT-REF'
+    assert (contextComponentRefs[0].text == '/Swcs/Comp/asw2_proto'), 'context ref should have reference to asw2_proto'
     
     teardown()
 
