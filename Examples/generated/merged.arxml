@@ -297,7 +297,6 @@
                           <CONTEXT-COMPOSITION-REF DEST="ROOT-SW-COMPOSITION-PROTOTYPE">/Can/system/CanSystem/rootSwcom</CONTEXT-COMPOSITION-REF>
                           <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</CONTEXT-COMPONENT-REF>
                           <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw2_proto</CONTEXT-COMPONENT-REF>
-                          <TARGET-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</TARGET-COMPONENT-REF>
                         </COMPONENT-IREF>
                       </COMPONENT-IREFS>
                       <ECU-INSTANCE-REF DEST="ECU-INSTANCE">/Can/ecus/ecu1</ECU-INSTANCE-REF>

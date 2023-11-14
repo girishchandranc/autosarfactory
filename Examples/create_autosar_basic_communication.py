@@ -168,7 +168,6 @@ swcMap1 = swctoEcuMp.new_Component()
 swcMap1.set_contextComposition(rootComp)
 swcMap1.add_contextComponent(asw1_proto)
 swcMap1.add_contextComponent(asw2_proto)
-swcMap1.set_targetComponent(asw1_proto)
 
 typesPackage = autosarfactory.new_file(os.path.join(generatdDir, 'array.arxml'), defaultArPackage='types', overWrite=True)
 
