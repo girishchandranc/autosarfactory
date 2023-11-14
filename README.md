@@ -112,11 +112,13 @@ The tool provides `export_to_file` method to export a specific element to a file
 
 - option1(using export function available in the node itself)
 ```python
+autosarfactory.read(['component.arxml'])
 swc = autosarfactory.get_node('/Swcs/swc1')
 swc.export_to_file('swc1Export.arxml', overWrite = True)
 ```
 - option2(using export function where the node is passed)
 ```python
+autosarfactory.read(['component.arxml'])
 swc = autosarfactory.get_node('/Swcs/swc1')
 autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 ```
