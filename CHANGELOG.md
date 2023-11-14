@@ -33,7 +33,7 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.3.1]() - 2023-07-11
 - Check if the parent node can have children before getting or adding children
 
-## [0.4.0]() - 2023-11-08
+## [0.4.0]() - 2023-11-14
 - ARXML elements are now added respecting the sequence order specified by Autosar schema.
 - Introduced new API `get_all_instances` to get all the instances of a particular node based on the given class type.
 - New feature to export AR-Package or PackageableElement(ApplicationSwComponentType, ISignal etc) to a file.

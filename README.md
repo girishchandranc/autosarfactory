@@ -107,6 +107,20 @@ srIf.new_DataElement('de1')
 autosarfactory.saveAs('mergedFile.arxml')
 ```
 
+### Export element
+The tool provides `export_to_file` method to export a specific element to a file including it's AR-Package hierarchy. This is only supported for CollectableElements(which means AP-Package as well as all PackageableElements which includes ApplicationSwComponentType, SR interface, Signals etc etc- precisely any elements which directly fall under an AR-Package)
+
+- option1(using export function available in the node itself)
+```python
+swc = autosarfactory.get_node('/Swcs/swc1')
+swc.export_to_file('swc1Export.arxml', overWrite = True)
+```
+- option2(using export function where the node)
+```python
+swc = autosarfactory.get_node('/Swcs/swc1')
+autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
+```
+
 ### Autosar visualizer
 The package also includes a graphical visualizer for the Autosar models which can be simply opened by passing the autosar root to the method `show_in_ui`.
 For example:
