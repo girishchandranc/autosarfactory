@@ -3,7 +3,6 @@
   <AR-PACKAGES>
     <AR-PACKAGE>
       <SHORT-NAME>DataTypes</SHORT-NAME>
-      <ELEMENTS/>
       <AR-PACKAGES>
         <AR-PACKAGE>
           <SHORT-NAME>baseTypes</SHORT-NAME>
@@ -232,7 +231,6 @@
     </AR-PACKAGE>
     <AR-PACKAGE>
       <SHORT-NAME>Can</SHORT-NAME>
-      <ELEMENTS/>
       <AR-PACKAGES>
         <AR-PACKAGE>
           <SHORT-NAME>signals</SHORT-NAME>

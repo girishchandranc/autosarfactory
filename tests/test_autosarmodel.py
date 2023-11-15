@@ -574,6 +574,7 @@ def test_model_remove_element():
     assert (swcEcuMapping.get_components()[0].get_contextComponents()[0].name == 'asw2_proto'), 'name should be asw2_proto'
 
     autosarfactory.save()
+    teardown()
 
     # Read saved xml manually and see if the element is removed
     tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
@@ -584,8 +585,30 @@ def test_model_remove_element():
     contextComponentRefs = tree.findall(".//{*}COMPONENT-IREF")[0].findall(".//{*}CONTEXT-COMPONENT-REF")
     assert (len(contextComponentRefs) == 1), 'should be one instance of CONTEXT-COMPONENT-REF'
     assert (contextComponentRefs[0].text == '/Swcs/Comp/asw2_proto'), 'context ref should have reference to asw2_proto'
-    
+
+    # Re-read the file and removal all elements under the arpackage and see if the file is updated properly.
+    autosarfactory.read(input_files)
+    package = autosarfactory.get_node('/Swcs')
+    swc = autosarfactory.get_node('/Swcs/asw2')
+    compo = autosarfactory.get_node('/Swcs/Comp')
+    system = autosarfactory.get_node('/Swcs/CanSystem')
+    package.remove_element(swc)
+    package.remove_element(compo)
+    package.remove_element(system)
+    assert(len(package.get_elements()) == 0), 'no elements expected'
+
+    autosarfactory.save()
     teardown()
+
+    # Read saved xml manually and see if the elements are removed
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    arpackages = tree.findall(".//{*}AR-PACKAGE")
+    for pack in arpackages:
+        if pack.find('{*}SHORT-NAME').text == 'Swcs':
+            assert(len(pack.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")) == 1), 'only one swc expected in the arpackage path /Swcs/Swcs_hierarchy1/Swcs_hierarchy2/asw123. Ones inside Swcs package are removed'
+            assert(len(pack.findall(".//{*}COMPOSITION-SW-COMPONENT-TYPE")) == 0), 'no composition expected as its already removed'
+            assert(len(pack.findall(".//{*}SYSTEM")) == 0), 'no system expected as its already removed'
+            break
 
 def test_model_export():
     """
@@ -652,3 +675,16 @@ def test_model_path_reference_with_parent_having_no_short_name():
     diagDE = map1.get_diagnosticDataElement()
     assert (diagDE is not None), 'diagDE should not be None'
     assert (diagDE.autosar_path == '/RootPackage/record2/element2'), 'diagDE path must be /RootPackage/record2/element2'
+
+def test_model_retrieval_of_elements_with_one_concrete_sub_type():
+    """
+    Tests if the model is able to properly retrieve elements which has only one sub-type in the autosar metamodel.
+    """
+    autosarfactory.read(input_files)
+    machineDesign = autosarfactory.get_node('/RootPackage/MachineDesign')
+    
+    # The element SERVICE-DISCOVERY-CONFIG can have only one type of sub concrete type 'SomeipServiceDiscovery' although it has a base class ServiceDiscoveryConfiguration.
+    configs = machineDesign.get_serviceDiscoveryConfigs()
+    assert (len(configs) == 1), 'only one config is expected'
+    assert (configs[0].get_someipServiceDiscoveryPort() == 1234), 'discovery port must be 1234'
+    teardown()
