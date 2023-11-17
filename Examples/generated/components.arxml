@@ -18,14 +18,13 @@
               <EVENTS>
                 <TIMING-EVENT>
                   <SHORT-NAME>te_5ms</SHORT-NAME>
-                  <PERIOD>0.005</PERIOD>
                   <START-ON-EVENT-REF DEST="RUNNABLE-ENTITY">/Swcs/asw1/beh1/Runnable_1</START-ON-EVENT-REF>
+                  <PERIOD>0.005</PERIOD>
                 </TIMING-EVENT>
               </EVENTS>
               <RUNNABLES>
                 <RUNNABLE-ENTITY>
                   <SHORT-NAME>Runnable_1</SHORT-NAME>
-                  <SYMBOL>Run1</SYMBOL>
                   <DATA-SEND-POINTS>
                     <VARIABLE-ACCESS>
                       <SHORT-NAME>dsp</SHORT-NAME>
@@ -37,6 +36,7 @@
                       </ACCESSED-VARIABLE>
                     </VARIABLE-ACCESS>
                   </DATA-SEND-POINTS>
+                  <SYMBOL>Run1</SYMBOL>
                 </RUNNABLE-ENTITY>
               </RUNNABLES>
             </SWC-INTERNAL-BEHAVIOR>
@@ -56,17 +56,16 @@
               <EVENTS>
                 <DATA-RECEIVED-EVENT>
                   <SHORT-NAME>DRE_Vdp</SHORT-NAME>
+                  <START-ON-EVENT-REF DEST="RUNNABLE-ENTITY">/Swcs/asw2/beh1/Runnable_2</START-ON-EVENT-REF>
                   <DATA-IREF>
                     <CONTEXT-R-PORT-REF DEST="R-PORT-PROTOTYPE">/Swcs/asw2/inPort</CONTEXT-R-PORT-REF>
                     <TARGET-DATA-ELEMENT-REF DEST="VARIABLE-DATA-PROTOTYPE">/Interfaces/srif1/de1</TARGET-DATA-ELEMENT-REF>
                   </DATA-IREF>
-                  <START-ON-EVENT-REF DEST="RUNNABLE-ENTITY">/Swcs/asw2/beh1/Runnable_2</START-ON-EVENT-REF>
                 </DATA-RECEIVED-EVENT>
               </EVENTS>
               <RUNNABLES>
                 <RUNNABLE-ENTITY>
                   <SHORT-NAME>Runnable_2</SHORT-NAME>
-                  <SYMBOL>Run2</SYMBOL>
                   <DATA-RECEIVE-POINT-BY-ARGUMENTS>
                     <VARIABLE-ACCESS>
                       <SHORT-NAME>dra</SHORT-NAME>
@@ -78,6 +77,7 @@
                       </ACCESSED-VARIABLE>
                     </VARIABLE-ACCESS>
                   </DATA-RECEIVE-POINT-BY-ARGUMENTS>
+                  <SYMBOL>Run2</SYMBOL>
                 </RUNNABLE-ENTITY>
               </RUNNABLES>
             </SWC-INTERNAL-BEHAVIOR>

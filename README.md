@@ -1,6 +1,6 @@
 [![Build Actions Status](https://github.com/girishchandranc/autosarfactory/workflows/Build/badge.svg)](https://github.com/girishchandranc/autosarfactory/actions)
 # Autosar Modelling Tool
-AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arxml files.
+AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arxml files. The folder `autosarfactory` contains the autosarfactory implementation with respect to the schema corresponding to the latest AUTOSAR release. Please check the folder `autosar_releases` for previous AUTOSAR releases
 
 ## How to use
 - Clone the repository.
@@ -105,6 +105,22 @@ srIf.new_DataElement('de1')
 
 #save changes
 autosarfactory.saveAs('mergedFile.arxml')
+```
+
+### Export element
+The tool provides `export_to_file` method to export a specific element to a file including it's AR-Package hierarchy. This is only supported for CollectableElements(which means AP-Package as well as all PackageableElements which includes ApplicationSwComponentType, SR interface, Signals etc etc- precisely any elements which directly fall under an AR-Package)
+
+- option1(using export function available in the node itself)
+```python
+autosarfactory.read(['component.arxml'])
+swc = autosarfactory.get_node('/Swcs/swc1')
+swc.export_to_file('swc1Export.arxml', overWrite = True)
+```
+- option2(using export function where the node is passed)
+```python
+autosarfactory.read(['component.arxml'])
+swc = autosarfactory.get_node('/Swcs/swc1')
+autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 ```
 
 ### Autosar visualizer

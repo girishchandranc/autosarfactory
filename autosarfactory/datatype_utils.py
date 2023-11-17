@@ -9,8 +9,12 @@ def get_int_value(text):
             # binary value
             return int(text[2:], 2)
         else:
-            # octal value
-            return int(text[2:], 8)
+            try:
+                # octal value
+                return int(text[2:], 8)
+            except:
+                # return as decimal value if the oct conversion doesn't work in the try
+                return int(text)
     else:
         # decimal value
         return int(text)

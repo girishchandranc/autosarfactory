@@ -1,5 +1,6 @@
 import os, sys, shutil
 import pytest, filecmp
+from lxml import etree
 
 mod_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, mod_path)
@@ -10,7 +11,8 @@ resourcesDir = os.path.join(os.path.dirname(__file__), 'resources')
 
 input_files = [os.path.join(resourcesDir, 'components.arxml'), 
                os.path.join(resourcesDir, 'datatypes.arxml'),
-               os.path.join(resourcesDir, 'interfaces.arxml')]
+               os.path.join(resourcesDir, 'interfaces.arxml'),
+               os.path.join(resourcesDir, 'diag_sw_mapping.arxml')]
 
 invalid_files = [os.path.join(resourcesDir, 'invalid.arxml')]
 
@@ -58,11 +60,11 @@ def test_model_access():
     """
     root, status = autosarfactory.read(input_files)
     assert (root is not None), 'root should not be None'
-    assert (len(root.get_arPackages()) == 3), '3 Ar-packages expected'
+    assert (len(root.get_arPackages()) == 4), '4 Ar-packages expected'
     
     swcPackage = next((x for x in root.get_arPackages() if x.name == 'Swcs'), None)
     assert (swcPackage is not None), 'swcPackage should not be None'
-    assert (len(swcPackage.get_elements()) == 3), '3 elements expected'
+    assert (len(swcPackage.get_elements()) == 4), '4 elements expected'
 
     asw1 = next((x for x in swcPackage.get_elements() if x.name == 'asw1'), None)
     asw2 = next((x for x in swcPackage.get_elements() if x.name == 'asw2'), None)
@@ -104,6 +106,14 @@ def test_model_path():
     assert (vdp is not None), 'vdp should not be None'
     assert(isinstance(vdp, autosarfactory.VariableDataPrototype)), 'vdp should be an instance of VariableDataPrototype'
     assert (vdp.name == 'de1'), 'name should be de1'
+
+    dswm = autosarfactory.get_node('/RootPackage/map1')
+    diagDE = dswm.get_diagnosticDataElement()
+    assert (diagDE is not None), 'diagDE should not be None'
+    assert (diagDE.autosar_path == '/RootPackage/Record1/element1'), 'diagDE path is /RootPackage/Record1/element1'
+
+    teardown()
+
 
 def test_model_reference():
     """
@@ -153,6 +163,7 @@ def test_model_read_attributes():
     assert(filter_node.get_mask() == 4095), 'value of mask should be 4095' # hex value in arxml
     assert(filter_node.get_max() == 15), 'value of max should be 15' # binary value in arxml
     assert(filter_node.get_min() == 375), 'value of min should be 375' # oct value in arxml
+    teardown()
 
 
 def test_model_modify():
@@ -165,6 +176,7 @@ def test_model_modify():
     assert(te.get_period() == 0.005), 'value of period should be 0.005'
     te.set_period(2000)
     assert(te.get_period() == 2000), 'value of period should be 2000'
+    teardown()
 
 def test_model_create_entity():
     """
@@ -197,7 +209,6 @@ def test_model_create_entity():
     assert(argument.name == 'arg1'), 'name should be arg1'
     assert(isinstance(argument.get_type(), autosarfactory.ImplementationDataType)), 'type should be ImplementationDataType'
     assert(argument.get_type().path == '/DataTypes/ImplTypes/uint8'), 'path of type should be /DataTypes/ImplTypes/uint8'
-
     teardown()
 
 
@@ -408,3 +419,272 @@ def test_model_referenced_by_elements():
     assert (isinstance(ref_by, autosarfactory.PRPortPrototype)), 'should be instance of PRPortPrototype'
     assert (ref_by.name == 'p1'), 'name should be p1'
     assert (ref_by.get_providedRequiredInterface() == csIf), 'interfaces should be same'
+    teardown()
+
+
+def test_model_get_all_instances():
+    """
+    Tests if the model returns the right instances when the method get_all_instances is called
+    """
+    root, status = autosarfactory.read(input_files)
+    runnables = autosarfactory.get_all_instances(root, autosarfactory.RunnableEntity)
+    assert (len(runnables) == 2), '2 runnables in the whole model'
+
+    runnables = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)
+    assert (len(runnables) == 1), '1 runnable in the swc asw1'
+    teardown()
+
+
+def test_xml_order_elements():
+    """
+    Tests if the elements were added in the right sequence as specified by Autosar
+    """
+    autosarfactory.read(input_files)
+    runnable = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)[0]
+
+    # Runnable just contains the elements DataSendPoints and Symbol initially 
+
+    # attribute CanBeInvokedConcurrently must be added after ShortName and before DataSendPoints
+    runnable.set_canBeInvokedConcurrently(True)
+
+    # Data write access should be added after DataSendPoint and before Symbol
+    dwa = runnable.new_DataWriteAcces('dwa1')
+    var = dwa.new_AccessedVariable().new_AutosarVariable()
+    var.set_portPrototype(autosarfactory.get_node('/Swcs/asw1/outPort'))
+    var.set_targetDataPrototype(autosarfactory.get_node('/Interfaces/srif1/de1'))
+
+    # Short name must be added as the first element
+    runnable.set_shortName("run1")
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the order of the elements are as expected by schema.
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    runnables = tree.findall(".//{*}RUNNABLE-ENTITY")
+    for run in runnables:
+        if run.find('{*}SHORT-NAME').text == 'run1':
+            assert (run[0].tag == '{http://autosar.org/schema/r4.0}SHORT-NAME'), 'First child must be SHORT-NAME'
+            assert (run[1].tag == '{http://autosar.org/schema/r4.0}CAN-BE-INVOKED-CONCURRENTLY'), 'Second child must be CAN-BE-INVOKED-CONCURRENTLY'
+            assert (run[2].tag == '{http://autosar.org/schema/r4.0}DATA-SEND-POINTS'), 'Third child must be DATA-SEND-POINTS'
+            assert (run[3].tag == '{http://autosar.org/schema/r4.0}DATA-WRITE-ACCESSS'), 'Fourth child must be DATA-WRITE-ACCESSS'
+            assert (run[4].tag == '{http://autosar.org/schema/r4.0}SYMBOL'), 'Last child must be SYMBOL'
+            break
+    teardown()
+
+def test_xml_order_elements_with_invisible_model_element():
+    """
+    Tests if the elements were added in the right sequence as specified by Autosar when the model elements doesn't appear in arxml
+    """
+    autosarfactory.read(input_files)
+    uint8BaseType = autosarfactory.get_node('/DataTypes/baseTypes/uint8')
+
+    # uint8 base type just contains the child elements shortName and MemAlignment
+
+    baseTypeDef = uint8BaseType.new_BaseTypeDirectDefinition() # create the invisible model element BaseTypeDirectDefinition
+
+    # BaseTypeEncoding should be added after ShortName and before MemAlignment
+    baseTypeDef.set_baseTypeEncoding('2C')
+
+    # NativeDeclaration should be added after MemAlignment
+    baseTypeDef.set_nativeDeclaration('unsigned char')
+
+    # BaseTypeSize should be added after ShortName and before BaseTypeEncoding and MemAlignment
+    baseTypeDef.set_baseTypeSize(8)
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the order of the elements are as expected by schema.
+    tree = etree.parse(os.path.join(resourcesDir, 'datatypes.arxml'), etree.XMLParser(remove_blank_text=True))
+    baseTypeFromFile = tree.findall(".//{*}SW-BASE-TYPE")[0]
+
+    assert (baseTypeFromFile[0].tag == '{http://autosar.org/schema/r4.0}SHORT-NAME'), 'First child must be SHORT-NAME'
+    assert (baseTypeFromFile[1].tag == '{http://autosar.org/schema/r4.0}BASE-TYPE-SIZE'), 'Second child must be BASE-TYPE-SIZE'
+    assert (baseTypeFromFile[1].text == '8'), 'Value must be 8'
+    assert (baseTypeFromFile[2].tag == '{http://autosar.org/schema/r4.0}BASE-TYPE-ENCODING'), 'Third child must be BASE-TYPE-ENCODING'
+    assert (baseTypeFromFile[2].text == '2C'), 'Value must be 2C'
+    assert (baseTypeFromFile[3].tag == '{http://autosar.org/schema/r4.0}MEM-ALIGNMENT'), 'Fourth child must be MEM-ALIGNMENT'
+    assert (baseTypeFromFile[4].tag == '{http://autosar.org/schema/r4.0}NATIVE-DECLARATION'), 'Last child must be NATIVE-DECLARATION'
+    assert (baseTypeFromFile[4].text == 'unsigned char'), 'Value must be unsigned char'
+
+    teardown()
+
+def test_xml_element_removed_when_value_is_unset():
+    """
+    Tests if the xml elements are removed when the value for the attribute or reference is unset or set to None.
+    """
+    autosarfactory.read(input_files)
+    
+    runnable = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw1'), autosarfactory.RunnableEntity)[0]
+    # Runnable contains the Symbol and we are trying to unset it.
+    assert (runnable.get_symbol() is not None), 'symbol should not be None'
+    runnable.set_symbol(None)
+    
+    dre = autosarfactory.get_all_instances(autosarfactory.get_node('/Swcs/asw2'), autosarfactory.DataReceivedEvent)[0]
+    # Timing Event has a reference to runnable. We are trying to unset it.
+    assert (dre.get_startOnEvent() is not None), 'runnable reference should not be None'
+    dre.set_startOnEvent(None)
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the symbol attribute and runnable reference are removed
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    runnableFromXmlfile = tree.findall(".//{*}RUNNABLE-ENTITY")[0]
+    assert(runnableFromXmlfile.find('{*}SYMBOL') is None), 'SYMBOL element should not exist'
+
+    dreFromXmlfile = tree.findall(".//{*}DATA-RECEIVED-EVENT")[0]
+    assert(dreFromXmlfile.find('{*}START-ON-EVENT-REF') is None), 'START-ON-EVENT-REF element should not exist'
+
+    teardown()
+
+def test_read_choice_elements():
+    """
+    Tests if the autosarfactory was able to read choice elements properly from the input model. For eg: SD element inside SDG
+    """
+    autosarfactory.read(input_files)
+    port = autosarfactory.get_node('/Swcs/asw1/outPort')
+
+    # Read SpecialDataGroups
+    sdgs = port.get_adminData().get_sdgs()
+    assert (len(sdgs) == 2), '2 SDG'
+    sdg = next(iter(sdgs))
+    assert (sdg.get_gid() == 'my_id'), 'GID should be my_id'
+    assert (next(iter(sdg.get_sds())).get_value() == 'version-1234'), 'SD value should be version-1234'
+
+    teardown()
+
+def test_model_remove_element():
+    """
+    Tests if the elements are removed from the model
+    """
+    autosarfactory.read(input_files)
+
+    # check removal of containment elements
+    package = autosarfactory.get_node('/Swcs')
+    swc = autosarfactory.get_node('/Swcs/asw1')
+    package.remove_element(swc)
+
+    # check removal of referenced elements
+    swcEcuMapping = autosarfactory.get_node('/Swcs/CanSystem/Mappings/SwcMapping')
+    swcProto = autosarfactory.get_node('/Swcs/Comp/asw1_proto')
+    assert (isinstance(swcEcuMapping, autosarfactory.SwcToEcuMapping)), 'should be instance of SwcToEcuMapping'
+    assert (len(swcEcuMapping.get_components()) == 1), 'should be one instance of component'
+    assert (isinstance(swcProto, autosarfactory.SwComponentPrototype)), 'should be instance of SwComponentPrototype'
+    swcEcuMapping.get_components()[0].remove_contextComponent(swcProto)
+    assert (len(swcEcuMapping.get_components()[0].get_contextComponents()) == 1), 'only 1 component exists after removing the asw1'
+    assert (swcEcuMapping.get_components()[0].get_contextComponents()[0].name == 'asw2_proto'), 'name should be asw2_proto'
+
+    autosarfactory.save()
+    teardown()
+
+    # Read saved xml manually and see if the element is removed
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
+    for swc in swcFromXmlFile:
+        assert(swc.find('{*}SHORT-NAME').text != 'asw1'), 'swc with name asw1 must not exist as its removed'
+
+    contextComponentRefs = tree.findall(".//{*}COMPONENT-IREF")[0].findall(".//{*}CONTEXT-COMPONENT-REF")
+    assert (len(contextComponentRefs) == 1), 'should be one instance of CONTEXT-COMPONENT-REF'
+    assert (contextComponentRefs[0].text == '/Swcs/Comp/asw2_proto'), 'context ref should have reference to asw2_proto'
+
+    # Re-read the file and removal all elements under the arpackage and see if the file is updated properly.
+    autosarfactory.read(input_files)
+    package = autosarfactory.get_node('/Swcs')
+    swc = autosarfactory.get_node('/Swcs/asw2')
+    compo = autosarfactory.get_node('/Swcs/Comp')
+    system = autosarfactory.get_node('/Swcs/CanSystem')
+    package.remove_element(swc)
+    package.remove_element(compo)
+    package.remove_element(system)
+    assert(len(package.get_elements()) == 0), 'no elements expected'
+
+    autosarfactory.save()
+    teardown()
+
+    # Read saved xml manually and see if the elements are removed
+    tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
+    arpackages = tree.findall(".//{*}AR-PACKAGE")
+    for pack in arpackages:
+        if pack.find('{*}SHORT-NAME').text == 'Swcs':
+            assert(len(pack.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")) == 1), 'only one swc expected in the arpackage path /Swcs/Swcs_hierarchy1/Swcs_hierarchy2/asw123. Ones inside Swcs package are removed'
+            assert(len(pack.findall(".//{*}COMPOSITION-SW-COMPONENT-TYPE")) == 0), 'no composition expected as its already removed'
+            assert(len(pack.findall(".//{*}SYSTEM")) == 0), 'no system expected as its already removed'
+            break
+
+def test_model_export():
+    """
+    Tests if an element is exported to a file
+    """
+    autosarfactory.read(input_files)
+
+    # 1. export function per node
+    swc = autosarfactory.get_node('/Swcs/Swcs_hierarchy1/Swcs_hierarchy2/asw123')
+    swc.export_to_file(os.path.join(resourcesDir, 'asw123Export.arxml'), overWrite = True)
+
+    # 2. generic export function on the autosarfactory
+    implPack = autosarfactory.get_node('/DataTypes/ImplTypes')
+    autosarfactory.export_to_file(implPack, os.path.join(resourcesDir, 'ImplTypesExport.arxml'), overWrite = True)
+
+    # exception if un-intended element is called for export.
+    port = autosarfactory.get_node('/Swcs/asw1/outPort')
+    with pytest.raises(Exception) as cm:
+        autosarfactory.export_to_file(port, os.path.join(resourcesDir, 'portExport.arxml'), overWrite = True)
+        assert ('Only elements of type CollectableElement can be exported(for eg: ARPackage, ApplicationSwComponentType, ISignal etc etc.)' == str(cm.exception)) 
+
+    # Read the exported file in 1 and 2 and see if the contents exist
+    # 1
+    tree = etree.parse(os.path.join(resourcesDir, 'asw123Export.arxml'), etree.XMLParser(remove_blank_text=True))
+    swcFromXmlFile = tree.findall(".//{*}APPLICATION-SW-COMPONENT-TYPE")
+    assert(len(swcFromXmlFile) == 1), 'only one swc exists'
+    assert(swcFromXmlFile[0].find('{*}SHORT-NAME').text == 'asw123'), 'name of swc must be asw123'
+
+    #2
+    tree = etree.parse(os.path.join(resourcesDir, 'ImplTypesExport.arxml'), etree.XMLParser(remove_blank_text=True))
+    ImplFromXmlFile = tree.findall(".//{*}IMPLEMENTATION-DATA-TYPE")
+    assert(len(ImplFromXmlFile) == 1), 'only one IDT exists'
+    assert(ImplFromXmlFile[0].find('{*}SHORT-NAME').text == 'uint8'), 'name of IDT must be uint8'
+
+    teardown()
+
+def test_model_path_reference_with_parent_having_no_short_name():
+    """
+    Tests if the reference path is properly set if the element has a parent with no short name.
+    """
+    autosarfactory.read(input_files)
+
+    # Referencing an element whose parent node doesn't have a short-name
+    map1 = autosarfactory.get_node('/RootPackage/map1')
+    map2 = map1.get_parent().new_DiagnosticServiceSwMapping('map2')
+    # here the recordElement do not have a short-name
+    dataElement2 = map1.get_parent().new_DiagnosticExtendedDataRecord('record2').new_RecordElement().new_DataElement('element2')
+    map2.set_diagnosticDataElement(dataElement2)
+    
+    autosarfactory.save()
+    teardown()
+
+    # Read saved xml manually and see if the element is removed
+    tree = etree.parse(os.path.join(resourcesDir, 'diag_sw_mapping.arxml'), etree.XMLParser(remove_blank_text=True))
+    diagSwMappings = tree.findall(".//{*}DIAGNOSTIC-SERVICE-SW-MAPPING")
+    for diag in diagSwMappings:
+        if (diag.find('{*}SHORT-NAME').text == 'map2'):
+            assert(diag.find('{*}DIAGNOSTIC-DATA-ELEMENT-REF').text == '/RootPackage/record2/element2'), 'reference path must be /RootPackage/record2/element2'
+            break
+    
+    # Re-read the saved model and see if the reference node is read properly.
+    autosarfactory.read(input_files)
+    map1 = autosarfactory.get_node('/RootPackage/map2')
+    diagDE = map1.get_diagnosticDataElement()
+    assert (diagDE is not None), 'diagDE should not be None'
+    assert (diagDE.autosar_path == '/RootPackage/record2/element2'), 'diagDE path must be /RootPackage/record2/element2'
+
+def test_model_retrieval_of_elements_with_one_concrete_sub_type():
+    """
+    Tests if the model is able to properly retrieve elements which has only one sub-type in the autosar metamodel.
+    """
+    autosarfactory.read(input_files)
+    machineDesign = autosarfactory.get_node('/RootPackage/MachineDesign')
+    
+    # The element SERVICE-DISCOVERY-CONFIG can have only one type of sub concrete type 'SomeipServiceDiscovery' although it has a base class ServiceDiscoveryConfiguration.
+    configs = machineDesign.get_serviceDiscoveryConfigs()
+    assert (len(configs) == 1), 'only one config is expected'
+    assert (configs[0].get_someipServiceDiscoveryPort() == 1234), 'discovery port must be 1234'
+    teardown()

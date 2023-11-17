@@ -5,7 +5,7 @@ import tkinter.font as tkFont
 import re
 import os,itertools
 from ttkthemes import ThemedStyle
-from .autosarfactory import Referrable
+from .autosarfactory import Referrable, EcucParameterValue, EcucAbstractReferenceValue
 from tkinter import Menu
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
@@ -196,8 +196,9 @@ class Application(tk.Frame):
         self.__go_to_menu = tk.Menu(self.__root, tearoff=0)
         self.__go_to_menu.add_command(label='Go to item', command=self.__go_to_node_in_asr_explorer)
         self.__asr_explorer_menu = tk.Menu(self.__root, tearoff=0)
-        self.__asr_explorer_menu.add_command(label='Copy Name', command=self.__copy_name_to_clip_board)
-        self.__asr_explorer_menu.add_command(label='Copy Path', command=self.__copy_path_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy ShortName', command=self.__copy_name_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy AutosarPath', command=self.__copy_path_to_clip_board)
+        self.__asr_explorer_menu.add_command(label='Copy FilePath', command=self.__copy_file_path_to_clip_board)
 
 
         # bind search entry
@@ -287,6 +288,13 @@ class Application(tk.Frame):
         if item != '' and int(item) in self.__asr_explorer_id_to_node_dict:
             self.__root.clipboard_clear()
             self.__root.clipboard_append(self.__asr_explorer_id_to_node_dict[int(item)].path)
+
+
+    def __copy_file_path_to_clip_board(self):
+        item = self.__go_to_node_id_in_asr_explorer
+        if item != '' and int(item) in self.__asr_explorer_id_to_node_dict:
+            self.__root.clipboard_clear()
+            self.__root.clipboard_append(self.__asr_explorer_id_to_node_dict[int(item)].file)
 
 
     def __go_to_node_in_asr_explorer(self):
@@ -444,9 +452,18 @@ class Application(tk.Frame):
         self.__asr_explorer_id_to_node_dict[id] = node
         self.__asr_explorer_node_to_id_dict[node] = id
 
-        element_text = node.name if node.name is not None else node.__class__.__name__
-        type_text = str(node)
+        if node.name is not None:
+            element_text = node.name
+        elif isinstance(node, EcucParameterValue) or isinstance(node, EcucAbstractReferenceValue):
+            defRef = node._node.find('{*}DEFINITION-REF')
+            if defRef is not None and defRef.text != '' and '/' in defRef.text:
+                element_text = defRef.text.split("/")[-1]
+            else:
+                element_text = node.__class__.__name__
+        else:
+            element_text = node.__class__.__name__
 
+        type_text = str(node)
         """
         # adjust column's width if necessary to fit each value
         col_w = self.__get_padded_text_width(element_text)

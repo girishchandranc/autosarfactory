@@ -3,16 +3,22 @@
   <AR-PACKAGES>
     <AR-PACKAGE>
       <SHORT-NAME>Can</SHORT-NAME>
-      <ELEMENTS/>
       <AR-PACKAGES>
         <AR-PACKAGE>
           <SHORT-NAME>signals</SHORT-NAME>
           <ELEMENTS>
             <I-SIGNAL>
               <SHORT-NAME>sig1</SHORT-NAME>
+              <ADMIN-DATA>
+                <SDGS>
+                  <SDG GID="12">
+                    <SD>new_sd</SD>
+                  </SDG>
+                </SDGS>
+              </ADMIN-DATA>
               <DATA-TYPE-POLICY>LEGACY</DATA-TYPE-POLICY>
-              <LENGTH>4</LENGTH>
               <I-SIGNAL-TYPE>PRIMITIVE</I-SIGNAL-TYPE>
+              <LENGTH>4</LENGTH>
               <SYSTEM-SIGNAL-REF DEST="SYSTEM-SIGNAL">/Can/systemsignals/syssig1</SYSTEM-SIGNAL-REF>
             </I-SIGNAL>
           </ELEMENTS>
@@ -22,7 +28,7 @@
           <ELEMENTS>
             <SYSTEM-SIGNAL>
               <SHORT-NAME>syssig1</SHORT-NAME>
-              <DYNAMIC-LENGTH>false</DYNAMIC-LENGTH>
+              <DYNAMIC-LENGTH>true</DYNAMIC-LENGTH>
             </SYSTEM-SIGNAL>
           </ELEMENTS>
         </AR-PACKAGE>
@@ -32,7 +38,7 @@
             <ECU-INSTANCE>
               <SHORT-NAME>ecu1</SHORT-NAME>
               <SLEEP-MODE-SUPPORTED>false</SLEEP-MODE-SUPPORTED>
-              <WAKE-UP-OVER-BUS-SUPPORTED>false</WAKE-UP-OVER-BUS-SUPPORTED>
+              <WAKE-UP-OVER-BUS-SUPPORTED>true</WAKE-UP-OVER-BUS-SUPPORTED>
             </ECU-INSTANCE>
           </ELEMENTS>
         </AR-PACKAGE>
@@ -41,32 +47,29 @@
           <ELEMENTS>
             <SYSTEM>
               <SHORT-NAME>CanSystem</SHORT-NAME>
-              <SYSTEM-VERSION></SYSTEM-VERSION>
               <MAPPINGS>
                 <SYSTEM-MAPPING>
                   <SHORT-NAME>Mappings</SHORT-NAME>
                   <DATA-MAPPINGS>
                     <SENDER-RECEIVER-TO-SIGNAL-MAPPING>
-                      <SYSTEM-SIGNAL-REF DEST="SYSTEM-SIGNAL">/Can/systemsignals/syssig1</SYSTEM-SIGNAL-REF>
                       <DATA-ELEMENT-IREF>
                         <CONTEXT-PORT-REF DEST="P-PORT-PROTOTYPE">/Swcs/asw1/outPort</CONTEXT-PORT-REF>
                         <TARGET-DATA-PROTOTYPE-REF DEST="VARIABLE-DATA-PROTOTYPE">/Interfaces/srif1/de1</TARGET-DATA-PROTOTYPE-REF>
                       </DATA-ELEMENT-IREF>
+                      <SYSTEM-SIGNAL-REF DEST="SYSTEM-SIGNAL">/Can/systemsignals/syssig1</SYSTEM-SIGNAL-REF>
                     </SENDER-RECEIVER-TO-SIGNAL-MAPPING>
                   </DATA-MAPPINGS>
                   <SW-MAPPINGS>
                     <SWC-TO-ECU-MAPPING>
                       <SHORT-NAME>SwcMapping</SHORT-NAME>
-                      <ECU-INSTANCE-REF DEST="ECU-INSTANCE">/Can/ecus/ecu1</ECU-INSTANCE-REF>
                       <COMPONENT-IREFS>
                         <COMPONENT-IREF>
                           <CONTEXT-COMPOSITION-REF DEST="ROOT-SW-COMPOSITION-PROTOTYPE">/Can/system/CanSystem/rootSwcom</CONTEXT-COMPOSITION-REF>
-                          <CONTEXT-COMPONENT-REFS>
-                            <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</CONTEXT-COMPONENT-REF>
-                            <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw2_proto</CONTEXT-COMPONENT-REF>
-                          </CONTEXT-COMPONENT-REFS>
+                          <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw1_proto</CONTEXT-COMPONENT-REF>
+                          <CONTEXT-COMPONENT-REF DEST="SW-COMPONENT-PROTOTYPE">/Swcs/Comp/asw2_proto</CONTEXT-COMPONENT-REF>
                         </COMPONENT-IREF>
                       </COMPONENT-IREFS>
+                      <ECU-INSTANCE-REF DEST="ECU-INSTANCE">/Can/ecus/ecu1</ECU-INSTANCE-REF>
                     </SWC-TO-ECU-MAPPING>
                   </SW-MAPPINGS>
                 </SYSTEM-MAPPING>
