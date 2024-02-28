@@ -11,13 +11,13 @@ with open('LICENSE') as f:
 
 setup(
     name='AutosarFactory',
-    version='0.4.0',
+    version='0.4.1',
     description='Python module for modelling autosar arxml files',
     long_description=readme,
     long_description_content_type="text/markdown",
     author='Girish Chandran',
     author_email='girishchandran.tpm@gmail.com',
-    url='https://github.com/girishchandranc/autosarmodeller',
+    url='https://github.com/girishchandranc/autosarfactory',
     license="MIT",
     packages=find_packages(exclude=('tests')),
     include_package_data=True,

@@ -37,3 +37,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 - ARXML elements are now added respecting the sequence order specified by Autosar schema.
 - Introduced new API `get_all_instances` to get all the instances of a particular node based on the given class type.
 - New feature to export AR-Package or PackageableElement(ApplicationSwComponentType, ISignal etc) to a file.
+
+## [0.4.1]() - 2024-02-28
+- Added a function to get the referenced value as string. This will be useful when you want to get the path of an referenced node which doesn't exist in the model.

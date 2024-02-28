@@ -688,3 +688,12 @@ def test_model_retrieval_of_elements_with_one_concrete_sub_type():
     assert (len(configs) == 1), 'only one config is expected'
     assert (configs[0].get_someipServiceDiscoveryPort() == 1234), 'discovery port must be 1234'
     teardown()
+
+def test_model_get_ref_as_path():
+    """
+    Tests if the model is able return the reference value as path. This will be useful if the referenced node itself is missing.
+    """
+    autosarfactory.read([os.path.join(resourcesDir, 'interfaces.arxml')])
+    de = autosarfactory.get_node('/Interfaces/srif1/de1')
+    assert (de.get_type_as_string() == '/DataTypes/ImplTypes/uint8')
+    teardown()
