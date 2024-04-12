@@ -697,3 +697,24 @@ def test_model_get_ref_as_path():
     de = autosarfactory.get_node('/Interfaces/srif1/de1')
     assert (de.get_type_as_string() == '/DataTypes/ImplTypes/uint8')
     teardown()
+
+def test_model_set_ref_value_with_no_referable_parent():
+    """
+    Tests if the model is able set the reference value to an element when the reference value has an element which do not have a short-name(and hence not referable).
+    """
+    pack = autosarfactory.new_file(path=os.path.join(resourcesDir, 'tempTest_set_Ref.arxml'), defaultArPackage='TestPackage', overWrite = True)
+    # CanClusterVariant is not referable and is not supposed to accept short-name. 
+    # The tooling internally must ignore if short-name is provided(both at element level and where it's sub-elements are referenced too)
+    canChannel = pack.new_CanCluster('Can_Cluster_0').new_CanClusterVariant('variant').new_CanPhysicalChannel('Can_channel_0')
+    sigTrig = canChannel.new_ISignalTriggering('sigTrig')
+    pduTrig = canChannel.new_PduTriggering('pduTrig')
+    pduTrig.new_ISignalTriggering().set_iSignalTriggering(sigTrig)
+    autosarfactory.save()
+
+    autosarfactory.read([os.path.join(resourcesDir, 'interfaces.arxml')])
+    pduTrigFromFile = autosarfactory.get_node('/TestPackage/Can_Cluster_0/Can_channel_0/pduTrig')
+    assert (pduTrigFromFile is not None)
+    assert (pduTrigFromFile.get_iSignalTriggerings()[0] is not None)
+    assert (pduTrigFromFile.get_iSignalTriggerings()[0].get_iSignalTriggering() is not None)
+    assert (pduTrigFromFile.get_iSignalTriggerings()[0].get_iSignalTriggering().autosar_path == '/TestPackage/Can_Cluster_0/Can_channel_0/sigTrig')
+    teardown()
