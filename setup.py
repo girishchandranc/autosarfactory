@@ -23,5 +23,5 @@ setup(
     include_package_data=True,
     install_requires=["lxml>=4.6.1",
                       "ttkthemes>=3.2.0"],
-    python_requires='>=3.6',
+    python_requires='>=3.7',
 )

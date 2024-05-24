@@ -40,3 +40,7 @@ Support for processing the integer attributes configured as hex, binary or octal
 
 ## [0.4.1]() - 2024-02-28
 - Added a function to get the referenced value as string. This will be useful when you want to get the path of an referenced node which doesn't exist in the model.
+
+## [0.5.0]() - 2024-05-24
+- Support for AUTOSAR R23-11
+- Added type hint for the method arguments and return types. This will assist users to efficiently write scripts(provided an editor with content assistance is used).
