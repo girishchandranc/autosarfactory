@@ -718,3 +718,38 @@ def test_model_set_ref_value_with_no_referable_parent():
     assert (pduTrigFromFile.get_iSignalTriggerings()[0].get_iSignalTriggering() is not None)
     assert (pduTrigFromFile.get_iSignalTriggerings()[0].get_iSignalTriggering().autosar_path == '/TestPackage/Can_Cluster_0/Can_channel_0/sigTrig')
     teardown()
+
+def test_read_compu_method():
+    """
+    Tests if the compu methods are read properly.
+    """
+    autosarfactory.read([os.path.join(resourcesDir, 'datatypes.arxml')])
+    cms = autosarfactory.get_all_instances(autosarfactory.get_root(), autosarfactory.CompuMethod)
+
+    closedIntervalCm :autosarfactory.CompuMethod = cms[0]
+    formulaCm :autosarfactory.CompuMethod = cms[1]
+
+    assert (isinstance(closedIntervalCm.get_compuInternalToPhys().get_compuContent(), autosarfactory.CompuScales))
+    cmScales :autosarfactory.CompuScales = closedIntervalCm.get_compuInternalToPhys().get_compuContent()
+
+    ecu_stop = cmScales.get_compuScales()[0]
+    assert(ecu_stop.get_lowerLimit().get() == '0')
+    assert(ecu_stop.get_upperLimit().get() == '0')
+
+    assert(isinstance(ecu_stop.get_compuScaleContents(), autosarfactory.CompuScaleConstantContents))
+    cmConst :autosarfactory.CompuScaleConstantContents = ecu_stop.get_compuScaleContents()
+    assert(isinstance(cmConst.get_compuConst().get_compuConstContentType(), autosarfactory.CompuConstTextContent))
+    cmContent :autosarfactory.CompuConstTextContent = cmConst.get_compuConst().get_compuConstContentType()
+    assert(cmContent.get_vt() == 'ECU_STATE_STOP')
+
+    assert (isinstance(formulaCm.get_compuInternalToPhys().get_compuContent(), autosarfactory.CompuScales))
+    cmScales :autosarfactory.CompuScales = formulaCm.get_compuInternalToPhys().get_compuContent()
+
+    cmScale = cmScales.get_compuScales()[0]
+    assert(isinstance(cmScale.get_compuScaleContents(), autosarfactory.CompuScaleRationalFormula))
+    formula :autosarfactory.CompuScaleRationalFormula = cmScale.get_compuScaleContents()
+
+    vs = formula.get_compuRationalCoeffs().get_compuNumerator().get_vs()
+    assert(vs[0].get() == '100')
+    assert(vs[1].get() == '200')
+    assert(vs[2].get() == '300')
