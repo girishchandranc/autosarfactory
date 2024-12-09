@@ -45,6 +45,7 @@ Support for processing the integer attributes configured as hex, binary or octal
 - Support for AUTOSAR R23-11
 - Added type hint for the method arguments and return types. This will assist users to efficiently write scripts(provided an editor with content assistance is used).
 
-## [0.5.1]() - 2024-12-08
+## [0.5.1]() - 2024-12-09
 - Fixed issues with reading contents of CompuMethod
 - Fixed issues with type hint for the setter method accepting enumeration types
+- Minor UI updates

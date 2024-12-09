@@ -346,6 +346,36 @@ class Application(tk.Frame):
             self.__go_to_node_id_in_asr_explorer = self.__asr_explorer_node_to_id_dict[self.__search_view_id_to_node_dict[int(item)]]
             self.__go_to_node_in_asr_explorer()
 
+    def __add_dict_values_to_property_view(self, name: str, value: dict, currentIdValue: int):
+        wrapper_element = self.__property_view.insert('',
+                                    "end",
+                                    iid=currentIdValue,
+                                    text=name,
+                                    values=(''))
+        self.__property_view.item(wrapper_element, open=True)
+        currentIdValue += 1
+
+        for v in value.keys():
+            propertyValue = ''
+            if isinstance(v,Enum):
+                propertyValue = v.literal if v is not None else ''
+            else:
+                propertyValue = str(v) if v is not None else ''
+                if isinstance(v, Referrable):
+                    self.__property_view_id_to_node_dict[currentIdValue] = v
+
+            # adjust column's width if necessary to fit each value
+            col_w = self.__get_padded_text_width(propertyValue)
+            if self.__property_view.column('#1',width=None) < col_w:
+                self.__property_view.column('#1', width=col_w)
+            self.__property_view.insert(wrapper_element,
+                                    "end",
+                                    iid=currentIdValue,
+                                    text='',
+                                    values=(propertyValue))
+            currentIdValue += 1
+
+        return currentIdValue
 
 
     def __update_properties_view(self, node):
@@ -357,30 +387,27 @@ class Application(tk.Frame):
         id = 1
         for name,value in node.get_property_values().items():
             propertyValue = ''
-            if isinstance(value, set):
-                if len(value) > 0:
-                    propertyValue = '['
-                    for v in value:
-                        propertyValue = propertyValue + str(value) if value is not None else '' + ','
-                    propertyValue = propertyValue + ']'
-            elif isinstance(value,Enum):
-                propertyValue = value.literal if value is not None else ''
+            if isinstance(value, dict):
+                id += self.__add_dict_values_to_property_view(name, value, id)
             else:
-                propertyValue = str(value) if value is not None else ''
-                if isinstance(value, Referrable):
-                    self.__property_view_id_to_node_dict[id] = value
+                if isinstance(value,Enum):
+                    propertyValue = value.literal if value is not None else ''
+                else:
+                    propertyValue = str(value) if value is not None else ''
+                    if isinstance(value, Referrable):
+                        self.__property_view_id_to_node_dict[id] = value
 
-            # adjust column's width if necessary to fit each value
-            col_w = self.__get_padded_text_width(propertyValue)
-            if self.__property_view.column('#1',width=None) < col_w:
-                self.__property_view.column('#1', width=col_w)
+                # adjust column's width if necessary to fit each value
+                col_w = self.__get_padded_text_width(propertyValue)
+                if self.__property_view.column('#1',width=None) < col_w:
+                    self.__property_view.column('#1', width=col_w)
 
-            self.__property_view.insert('',
+                self.__property_view.insert('',
                                         "end",
                                         iid=id,
                                         text=name,
                                         values=(propertyValue))
-            id +=1
+                id +=1
 
 
     def __update_search_view(self, nodes):
@@ -479,7 +506,7 @@ class Application(tk.Frame):
                                     "end",
                                     iid=id,
                                     text=element_text,
-                                    values=type_text)
+                                    values=type_text.replace('"', '\\"'))
 
 
     def __get_padded_text_width(self, text):
