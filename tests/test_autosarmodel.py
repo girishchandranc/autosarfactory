@@ -753,3 +753,14 @@ def test_read_compu_method():
     assert(vs[0].get() == '100')
     assert(vs[1].get() == '200')
     assert(vs[2].get() == '300')
+
+def test_read_split_files():
+    """
+    Tests if the contents in split files are read properly.
+    """
+    autosarfactory.read([os.path.join(resourcesDir, 'split1.arxml'),os.path.join(resourcesDir, 'split2.arxml')])
+    components = autosarfactory.get_node('/System/Composition_A').get_components()
+
+    assert(len(components) == 2)
+    assert(components[0].get_type().name == 'Component1')
+    assert(components[1].get_type().name == 'Component2')
