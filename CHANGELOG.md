@@ -53,3 +53,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.5.2]() - 2025-04-10
 - Fixed issues with reading split contents from multiple files(issue #32)
 - Autosarfactory now supports processing references where the `ReferenceBase` are configured
+
+## [0.6.0]() - 2025-08-05
+- Support for AUTOSAR R24-11
