@@ -56,3 +56,7 @@ Support for processing the integer attributes configured as hex, binary or octal
 
 ## [0.6.0]() - 2025-08-05
 - Support for AUTOSAR R24-11
+  
+## [0.6.1]() - 2025-12-23
+- Now, the objects can be created also using class constructors of the relevant model element. This is an add-on to the existing factory functions already available.
+- Fixed issues with saving when model elements are split across multiple files.
