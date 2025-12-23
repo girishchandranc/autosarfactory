@@ -16,11 +16,19 @@ input_files = [os.path.join(resourcesDir, 'components.arxml'),
 
 invalid_files = [os.path.join(resourcesDir, 'invalid.arxml')]
 
-def teardown():
+def _create_temp_dir():
+    tempDir = os.path.join(resourcesDir,"temp")
+    os.makedirs(tempDir, exist_ok=True)
+    return tempDir
+
+def teardown(deleteTempDir = True):
     """ teardown any state that was previously setup.
     """
     autosarfactory.reinit()
     assert (autosarfactory.get_root() is None), 'Root should be None'
+
+    if deleteTempDir and os.path.exists(os.path.join(resourcesDir,"temp")):
+        shutil.rmtree(os.path.join(resourcesDir,"temp"))
 
 def test_model_load_invalid_input():
     """
@@ -224,10 +232,8 @@ def test_model_save():
 
     #copy the input files to a difference location and compare between the old and new files.
     componentArxml = os.path.join(resourcesDir, 'components.arxml')
-    tempDir = os.path.join(resourcesDir,"temp")
+    tempDir = _create_temp_dir()
     tempComponentArxml = os.path.join(tempDir, 'components.arxml')
-
-    os.mkdir(tempDir)
     shutil.copy(componentArxml, tempDir)
 
     autosarfactory.save()
@@ -235,7 +241,37 @@ def test_model_save():
 
     #copy back the originalfile
     shutil.copy(tempComponentArxml, resourcesDir)
-    shutil.rmtree(tempDir)
+    teardown()
+
+def test_model_save_selected_files():
+    """
+    Tests if the model is saved after making changes.
+    """
+    autosarfactory.read(input_files)
+    te = autosarfactory.get_node('/Swcs/asw1/beh1/te_5ms')
+    assert (te is not None), 'te should not be None'
+    assert(te.get_period() == 0.005), 'value of period should be 0.005'
+    te.set_period(2000)
+
+    #create new file
+    newFile = os.path.join(resourcesDir, 'newFileToSave.arxml')
+    arPackage = autosarfactory.new_file(newFile,overWrite=True,defaultArPackage='myPack')
+    swc = arPackage.new_ApplicationSwComponentType('swc')
+    interface = arPackage.new_SenderReceiverInterface('if')
+
+    port = swc.new_PPortPrototype('port')
+    port.set_providedInterface(interface)
+
+    #copy the input files to a difference location and compare between the old and new files.
+    componentArxml = os.path.join(resourcesDir, 'components.arxml')
+    tempDir = _create_temp_dir()
+    tempComponentArxml = os.path.join(tempDir, 'components.arxml')
+    shutil.copy(componentArxml, tempDir)
+
+    autosarfactory.save([newFile])
+    assert (filecmp.cmp(componentArxml, tempComponentArxml) is True), "files should be same as the save action should not make the component.arxml file"
+
+    os.remove(newFile)
     teardown()
 
 def test_model_saveas():
@@ -266,17 +302,12 @@ def test_model_read_saved_file():
 
     #copy the input files to a difference location and compare between the old and new files.
     componentArxml = os.path.join(resourcesDir, 'components.arxml')
-    tempDir = os.path.join(resourcesDir,"temp")
+    tempDir = _create_temp_dir()
     tempComponentArxml = os.path.join(tempDir, 'components.arxml')
-
-    try:
-        os.mkdir(tempDir)
-    except:
-        pass
     shutil.copy(componentArxml, tempDir)
 
     autosarfactory.save()
-    teardown()
+    teardown(deleteTempDir=False)
 
     autosarfactory.read([componentArxml])
     te = autosarfactory.get_node('/Swcs/asw1/beh1/te_5ms')
@@ -285,7 +316,6 @@ def test_model_read_saved_file():
     
     #copy back the originalfile
     shutil.copy(tempComponentArxml, resourcesDir)
-    shutil.rmtree(tempDir)
     teardown()
 
 def test_model_exception_when_create_new_file():
@@ -398,7 +428,7 @@ def test_model_referenced_by_elements():
 
     mergedArxml = os.path.join(resourcesDir, 'merged.arxml')
     autosarfactory.saveAs(mergedArxml,overWrite=True)
-    teardown()
+    teardown(deleteTempDir=False)
 
     # again read the file and check if the values and references exist
     autosarfactory.read([mergedArxml])
@@ -574,7 +604,7 @@ def test_model_remove_element():
     assert (swcEcuMapping.get_components()[0].get_contextComponents()[0].name == 'asw2_proto'), 'name should be asw2_proto'
 
     autosarfactory.save()
-    teardown()
+    teardown(deleteTempDir=False)
 
     # Read saved xml manually and see if the element is removed
     tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
@@ -598,8 +628,6 @@ def test_model_remove_element():
     assert(len(package.get_elements()) == 0), 'no elements expected'
 
     autosarfactory.save()
-    teardown()
-
     # Read saved xml manually and see if the elements are removed
     tree = etree.parse(os.path.join(resourcesDir, 'components.arxml'), etree.XMLParser(remove_blank_text=True))
     arpackages = tree.findall(".//{*}AR-PACKAGE")
@@ -609,6 +637,8 @@ def test_model_remove_element():
             assert(len(pack.findall(".//{*}COMPOSITION-SW-COMPONENT-TYPE")) == 0), 'no composition expected as its already removed'
             assert(len(pack.findall(".//{*}SYSTEM")) == 0), 'no system expected as its already removed'
             break
+    
+    teardown()
 
 def test_model_export():
     """
@@ -659,8 +689,6 @@ def test_model_path_reference_with_parent_having_no_short_name():
     map2.set_diagnosticDataElement(dataElement2)
     
     autosarfactory.save()
-    teardown()
-
     # Read saved xml manually and see if the element is removed
     tree = etree.parse(os.path.join(resourcesDir, 'diag_sw_mapping.arxml'), etree.XMLParser(remove_blank_text=True))
     diagSwMappings = tree.findall(".//{*}DIAGNOSTIC-SERVICE-SW-MAPPING")
@@ -675,6 +703,8 @@ def test_model_path_reference_with_parent_having_no_short_name():
     diagDE = map1.get_diagnosticDataElement()
     assert (diagDE is not None), 'diagDE should not be None'
     assert (diagDE.autosar_path == '/RootPackage/record2/element2'), 'diagDE path must be /RootPackage/record2/element2'
+
+    teardown()
 
 def test_model_retrieval_of_elements_with_one_concrete_sub_type():
     """
@@ -711,7 +741,7 @@ def test_model_set_ref_value_with_no_referable_parent():
     pduTrig.new_ISignalTriggering().set_iSignalTriggering(sigTrig)
     autosarfactory.save()
 
-    autosarfactory.read([os.path.join(resourcesDir, 'interfaces.arxml')])
+    autosarfactory.read([os.path.join(resourcesDir, 'tempTest_set_Ref.arxml')])
     pduTrigFromFile = autosarfactory.get_node('/TestPackage/Can_Cluster_0/Can_channel_0/pduTrig')
     assert (pduTrigFromFile is not None)
     assert (pduTrigFromFile.get_iSignalTriggerings()[0] is not None)
@@ -754,6 +784,8 @@ def test_read_compu_method():
     assert(vs[1].get() == '200')
     assert(vs[2].get() == '300')
 
+    teardown()
+
 def test_read_split_files():
     """
     Tests if the contents in split files are read properly.
@@ -764,3 +796,119 @@ def test_read_split_files():
     assert(len(components) == 2)
     assert(components[0].get_type().name == 'Component1')
     assert(components[1].get_type().name == 'Component2')
+    teardown()
+
+def test_model_save_with_element_splitted():
+    """
+    Tests if the model is saved after making changes where elements are splitted across multiple files.
+    """
+    splitFiles = [os.path.join(resourcesDir, 'split1.arxml'),os.path.join(resourcesDir, 'split2.arxml')]
+    autosarfactory.read(splitFiles)
+    comp1:autosarfactory.ApplicationSwComponentType = autosarfactory.get_node('/ComponentPkg/Component1')
+
+    #copy the split files to a difference location and compare between the old and new files.
+    tempDir = _create_temp_dir()
+    for f in splitFiles:
+        shutil.copy(f, tempDir)
+
+    #Add a port and save the file
+    comp1.new_PPortPrototype('port1')
+    autosarfactory.save()
+
+    assert (filecmp.cmp(os.path.join(resourcesDir, 'split1.arxml'), os.path.join(tempDir, 'split1.arxml')) is False), "files should be same as the save action should modify the split1.arxml file"
+    assert (filecmp.cmp(os.path.join(resourcesDir, 'split2.arxml'), os.path.join(tempDir, 'split2.arxml')) is True), "files should be same as the save action should not modify the split2.arxml file"
+
+    teardown(deleteTempDir=False)
+    #read the file split1.arxml and see if the new port is added
+    autosarfactory.read(splitFiles)
+    comp1:autosarfactory.ApplicationSwComponentType = autosarfactory.get_node('/ComponentPkg/Component1')
+    assert(len(comp1.get_ports()) == 1), '1 port should exists'
+    assert(comp1.get_ports()[0].name == 'port1'), 'name of port must be port1'
+
+    #As the split1 file is only loaded, it must only contain one component prototype and component1
+    compo:autosarfactory.CompositionSwComponentType = autosarfactory.get_node('/System/Composition_A')
+    assert(compo is not None), 'Composition_A must exist'
+    assert(len(compo.get_components()) == 2)
+    assert(compo.get_components()[0].get_type().name == 'Component1')
+    assert(compo.get_components()[1].get_type().name == 'Component2')
+    
+    # copying back the files to resoursec directory and remove the temp directory
+    shutil.copy(os.path.join(tempDir, 'split1.arxml'), resourcesDir)
+    shutil.copy(os.path.join(tempDir, 'split2.arxml'), resourcesDir)
+
+    teardown()
+
+def test_model_save_selected_files_with_element_splitted():
+    """
+    Tests if the model is saved after making changes where elements are splitted across multiple files.
+    """
+    splitFiles = [os.path.join(resourcesDir, 'split1.arxml'),os.path.join(resourcesDir, 'split2.arxml')]
+    autosarfactory.read(splitFiles)
+    comp1:autosarfactory.ApplicationSwComponentType = autosarfactory.get_node('/ComponentPkg/Component1')
+
+    #copy the split files to a difference location and compare between the old and new files.
+    tempDir = _create_temp_dir()
+    for f in splitFiles:
+        shutil.copy(f, tempDir)
+
+    #Add a port and save the file
+    comp1.new_PPortPrototype('port1')
+    autosarfactory.save([os.path.join(resourcesDir, 'split1.arxml')])
+
+    assert (filecmp.cmp(os.path.join(resourcesDir, 'split1.arxml'), os.path.join(tempDir, 'split1.arxml')) is False), "files should be same as the save action should modify the split1.arxml file"
+    assert (filecmp.cmp(os.path.join(resourcesDir, 'split2.arxml'), os.path.join(tempDir, 'split2.arxml')) is True), "files should be same as the save action should not modify the split2.arxml file"
+
+    teardown(deleteTempDir=False)
+    #read the file split1.arxml and see if the new port is added
+    autosarfactory.read([os.path.join(resourcesDir, 'split1.arxml')])
+    comp1:autosarfactory.ApplicationSwComponentType = autosarfactory.get_node('/ComponentPkg/Component1')
+    assert(len(comp1.get_ports()) == 1), '1 port should exists'
+    assert(comp1.get_ports()[0].name == 'port1'), 'name of port must be port1'
+
+    #As the split1 file is only loaded, it must only contain one component prototype and component1
+    compo:autosarfactory.CompositionSwComponentType = autosarfactory.get_node('/System/Composition_A')
+    assert(compo is not None), 'Composition_A must exist'
+    assert(len(compo.get_components()) == 1)
+    assert(compo.get_components()[0].get_type().name == 'Component1')
+    
+    assert(len(comp1.get_parent().get_elements()) == 1), 'only 1 child element of ComponentPkg'
+    assert(comp1.get_parent().get_elements()[0].name == 'Component1'), 'only component1 shall exists'
+
+
+    # copying back the files to resoursec directory and remove the temp directory
+    shutil.copy(os.path.join(tempDir, 'split1.arxml'), resourcesDir)
+    shutil.copy(os.path.join(tempDir, 'split2.arxml'), resourcesDir)
+
+    teardown()
+
+def test_create_model_elements_from_constructor():
+    """
+    Tests if the model elements are created as expected using the CTor
+    """
+    filePath = os.path.join(resourcesDir, 'newFileCreateModelElementFromCTor.arxml')
+    arPackage = autosarfactory.new_file(filePath,overWrite=True,defaultArPackage='myPack')
+    
+    swc = autosarfactory.ApplicationSwComponentType()
+    swc.set_shortName('swc')
+    arPackage.add_element(swc)
+
+    interface = autosarfactory.SenderReceiverInterface()
+    interface.set_shortName('if')
+    arPackage.add_element(interface)
+
+    port = autosarfactory.PPortPrototype()
+    port.set_shortName('port')
+    swc.add_port(port)
+    port.set_providedInterface(interface)
+
+    autosarfactory.save()
+    teardown(deleteTempDir=False)
+
+    # read the created file and see if the contents exists
+    autosarfactory.read([os.path.join(resourcesDir, 'newFileCreateModelElementFromCTor.arxml')])
+    swcFromFile:autosarfactory.ApplicationSwComponentType = autosarfactory.get_node('/myPack/swc')
+    assert (swcFromFile is not None)
+    assert (len(swcFromFile.get_ports()) == 1)
+    assert (swcFromFile.get_ports()[0].get_shortName() == 'port')
+    assert (swcFromFile.get_ports()[0].get_providedInterface().get_shortName() == 'if')
+    teardown()
