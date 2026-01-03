@@ -60,3 +60,7 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.6.1]() - 2025-12-23
 - Now, the objects can be created also using class constructors of the relevant model element. This is an add-on to the existing factory functions already available.
 - Fixed issues with saving when model elements are split across multiple files.
+
+## [0.6.2]() - 2026-01-03
+- Optimized the save actions. The library no longer tries to write the complete element tree, but rather only updates where it's required. This has made a significant performance improvement.
+- Minor UI updates

@@ -4,9 +4,9 @@ import tkinter.ttk as ttk
 import tkinter.font as tkFont
 import re
 import os,itertools
-from ttkthemes import ThemedStyle
 from .autosarfactory import Referrable, EcucParameterValue, EcucAbstractReferenceValue
 from tkinter import Menu
+import sv_ttk
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
 __PAD_X__ = 5 # For some additional padding in the column width
@@ -21,6 +21,7 @@ class Application(tk.Frame):
         self.__search_dropdown = None
         self.__search_field = None
         self.__search_view = None
+        self.__search_results_label = None
         self.__go_to_menu = None
         self.__asr_explorer_menu = None
         self.__current_theme = 'scidgreen'
@@ -35,54 +36,15 @@ class Application(tk.Frame):
         self.__font__ = tkFont.nametofont('TkHeadingFont')
         self.__populate_tree(autosar_root)
 
-
-    def __selectTheme(self, themeName):
-        style = ThemedStyle(self.__root)
-        if(themeName == 'scidgreen'):
-            self.__current_theme='scidgreen'
-        elif(themeName == 'ubuntu'):
-            self.__current_theme='ubuntu'
-        elif(themeName == 'alt'):
-            self.__current_theme='alt'
-        elif(themeName == 'equilux'):
-            self.__current_theme='equilux'
-        elif(themeName == 'classic'):
-            self.__current_theme='classic'
-        elif(themeName == 'vista'):
-            self.__current_theme='vista'
-        elif(themeName == 'default'):
-            self.__current_theme='default'
-        else:
-            self.__current_theme='scidgreen'
-        style.theme_use(self.__current_theme)
-
-
     def __initialize_ui(self):
         # Configure the root object for the Application
         self.__root.iconphoto(True, self.__asr_img)
         self.__root.title("Autosar Visualizer")
         self.__root.minsize(width=800, height=600)
 
-        # set theme
-        style = ThemedStyle(self.__root)
-        #print(style.themes)
-#        ['yaru', 'default', 'vista', 'classic', 'scidgreen', 'equilux', 'scidgrey', 'adapta', 'scidpink', 'scidmint', 'plastik', 'alt', 'clearlooks', 'itft1', 'smog', 'clam', 'scidsand', 'kroc', 'radiance', 'black', 'blue', 'arc', 'winxpblue', 'scidblue', 'ubuntu', 'keramik', 'winnative', 'elegance', 'aquativo', 'scidpurple', 'xpnative', 'breeze']
-        #style.theme_use("equilux") #- very slow for some reason
-        style.theme_use(self.__current_theme)
-
         # create ui components
         menubar = Menu(self.__root)
         filemenu = Menu(menubar, tearoff=0)
-
-        menubar.add_cascade(label="Select Theme", menu=filemenu)
-
-        filemenu.add_command(label="Default", command=lambda:self.__selectTheme('default'))
-        filemenu.add_command(label="ScidGreen", command=lambda:self.selectTheme('scidgreen'))
-        filemenu.add_command(label="Ubuntu", command=lambda:self.__selectTheme('ubuntu'))
-        filemenu.add_command(label="Classic", command=lambda:self.__selectTheme('classic'))
-        filemenu.add_command(label="Vista", command=lambda:self.__selectTheme('vista'))
-        filemenu.add_command(label="Alt", command=lambda:self.__selectTheme('alt'))
-        filemenu.add_command(label="Equilux", command=lambda:self.__selectTheme('equilux'))
         self.__root.config(menu=menubar)
 
         menubar.add_command(label="Exit", command=lambda:self.__client_exit(self.__root))
@@ -132,7 +94,7 @@ class Application(tk.Frame):
         self.__search_dropdown = ttk.Combobox(search_frame, state="readonly", values=["Short Name","Autosar Type","Regular Expression"])
         self.__search_field = ttk.Entry(search_frame)
         self.__search_field.insert(0, 'search')
-        search_results_label = ttk.Label(search_frame, text="Results")
+        self.__search_results_label = ttk.Label(search_frame, text="Results")
         self.__search_view = ttk.Treeview(search_frame, show="tree")
         self.__search_view.column('#0', stretch=tk.YES, minwidth=50)
 
@@ -181,7 +143,7 @@ class Application(tk.Frame):
         self.__search_dropdown.grid(row=0, column=4, sticky='ew')
         self.__search_dropdown.current(0)
         self.__search_field.grid(row=1, column=3,columnspan=2, sticky='ew')
-        search_results_label.grid(row=2, column=3, sticky='ew', columnspan=2)
+        self.__search_results_label.grid(row=2, column=3, sticky='ew', columnspan=2)
         self.__search_view.grid(row=3, column=3, sticky='nsew',columnspan=2)
         vsb3.grid(row=3, column=5, sticky='ns')
         hsb3.grid(row=5, column=3, sticky='ew',columnspan=2)
@@ -415,6 +377,8 @@ class Application(tk.Frame):
         self.__search_view.delete(*self.__search_view.get_children())
         self.__search_view_id_to_node_dict.clear()
 
+        self.__search_results_label.configure(text="Results({} hits)".format(str(len(nodes))))
+        self.__search_results_label.update()
         # Add new values
         id = 1
         for node in nodes:
@@ -520,4 +484,5 @@ class Application(tk.Frame):
 def show_in_ui(autosarRoot):
     win = tk.Tk()
     Application(win, autosarRoot)
+    sv_ttk.set_theme("light")
     win.mainloop()
