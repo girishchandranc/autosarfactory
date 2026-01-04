@@ -7,6 +7,8 @@ import os,itertools
 from .autosarfactory import Referrable, EcucParameterValue, EcucAbstractReferenceValue
 from tkinter import Menu
 import sv_ttk
+from configparser import ConfigParser
+from pathlib import Path
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
 __PAD_X__ = 5 # For some additional padding in the column width
@@ -36,6 +38,7 @@ class Application(tk.Frame):
         self.__font__ = tkFont.nametofont('TkHeadingFont')
         self.__populate_tree(autosar_root)
 
+
     def __initialize_ui(self):
         # Configure the root object for the Application
         self.__root.iconphoto(True, self.__asr_img)
@@ -45,6 +48,9 @@ class Application(tk.Frame):
         # create ui components
         menubar = Menu(self.__root)
         filemenu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Select Theme", menu=filemenu)
+        filemenu.add_command(label="Light", command=lambda:sv_ttk.set_theme('light'))
+        filemenu.add_command(label="Dark", command=lambda:sv_ttk.set_theme('dark'))
         self.__root.config(menu=menubar)
 
         menubar.add_command(label="Exit", command=lambda:self.__client_exit(self.__root))
@@ -484,5 +490,23 @@ class Application(tk.Frame):
 def show_in_ui(autosarRoot):
     win = tk.Tk()
     Application(win, autosarRoot)
-    sv_ttk.set_theme("light")
+
+    # read theme preference
+    pref_file = os.path.join(Path(__file__).resolve().parent, 'AutosarUI_pref.ini')
+    config = ConfigParser()
+    config.read(pref_file)
+    pref_theme = config.get('Appearance', 'theme', fallback='light')
+
+    # set the theme
+    sv_ttk.set_theme(pref_theme)
+
+    def on_destroy(event):
+        if event.widget != win:
+            return
+        # save last used theme on exit
+        config['Appearance'] = {'theme': sv_ttk.get_theme(win)}
+        with open(pref_file, 'w') as f:
+            config.write(f)
+
+    win.bind("<Destroy>", on_destroy)
     win.mainloop()
