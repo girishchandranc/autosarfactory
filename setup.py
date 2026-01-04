@@ -11,7 +11,7 @@ with open('LICENSE') as f:
 
 setup(
     name='AutosarFactory',
-    version='0.6.1',
+    version='0.6.2',
     description='Python module for modelling autosar arxml files',
     long_description=readme,
     long_description_content_type="text/markdown",
@@ -22,6 +22,6 @@ setup(
     packages=find_packages(exclude=('tests')),
     include_package_data=True,
     install_requires=["lxml>=4.6.1",
-                      "ttkthemes>=3.2.0"],
+                      "sv-ttk>=2.6.1"],
     python_requires='>=3.7',
 )

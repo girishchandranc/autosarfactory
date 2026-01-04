@@ -36,7 +36,7 @@ class XmlElementDirtyTracker:
             self.__mark_element_dirty(element)
 
     def is_dirty(self,element) -> bool:
-        return bool(self.__dirty.get(self.__get_key_value(element), False))
+        return element is not None and bool(self.__dirty.get(self.__get_key_value(element), False))
 
     def is_attribute_dirty(self, attribute, element) -> bool:
         return bool(self.__dirty.get(self.__get_key_value(element, attribute), False))
