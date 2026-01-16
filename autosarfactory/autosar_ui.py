@@ -1,21 +1,175 @@
 from enum import Enum
 import tkinter as tk
-import tkinter.ttk as ttk
 import tkinter.font as tkFont
 import re
 import os,itertools
-from .autosarfactory import Referrable, EcucParameterValue, EcucAbstractReferenceValue
-from tkinter import Menu
+from . import autosarfactory
+from tkinter import Menu, filedialog, ttk, messagebox
 import sv_ttk
 from configparser import ConfigParser
 from pathlib import Path
+import threading
+import time
 
 __resourcesDir__ = os.path.join(os.path.dirname(__file__), 'resources')
 __PAD_X__ = 5 # For some additional padding in the column width
 
+class LoadModelsDialog(tk.Toplevel):
+    """
+    A modal dialog for selecting files/folders
+    """
+    def __init__(self, parent, existing_files =[]):
+        super().__init__(parent)
+
+        self.transient(parent)
+        self.title("Load Models")
+        self.geometry("600x450")
+        self.resizable(False, False)
+
+        self.selected_paths = existing_files
+        self.result = None
+        self.autosarRoot = None
+        self.worker_thread = None
+        self.loading_error = None
+        self._create_widgets()
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.grab_set()
+        self.position_center()
+        self.wait_window(self)
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill="both", expand=True)
+
+        list_frame = ttk.LabelFrame(main_frame, text="Selected Files and Folders")
+        list_frame.pack(fill="both", expand=True, pady=5)
+
+        self.path_listbox = tk.Listbox(list_frame, background="white")
+        self.path_listbox.pack(side="left", fill="both", expand=True, padx=(5,0), pady=5)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.path_listbox.yview)
+        scrollbar.pack(side="right", fill="y", padx=(0,5), pady=5)
+        self.path_listbox.config(yscrollcommand=scrollbar.set)
+        self._update_listbox()
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=5)
+
+        self.add_files_btn = ttk.Button(button_frame, text="Add File(s)...", command=self._add_files)
+        self.add_folder_btn = ttk.Button(button_frame, text="Add Folder...", command=self._add_folder)
+        self.remove_btn = ttk.Button(button_frame, text="Remove Selected", command=self._remove_selected)
+
+        self.add_files_btn.pack(side="left", padx=5)
+        self.add_folder_btn.pack(side="left", padx=5)
+        self.remove_btn.pack(side="left", padx=5)
+
+        # --- Progress Bar Widgets ---
+        self.progress_frame = ttk.Frame(main_frame)
+        self.progress_label = ttk.Label(self.progress_frame, text="Loading...")
+        self.progress_bar = ttk.Progressbar(self.progress_frame, orient='horizontal', mode='indeterminate')
+        self.progress_label.pack(fill="x")
+        self.progress_bar.pack(fill="x", pady=5)
+
+        # --- OK/Cancel Frame ---
+        ok_cancel_frame = ttk.Frame(main_frame)
+        ok_cancel_frame.pack(side="bottom", fill="x", pady=(10, 0))
+
+        self.load_btn = ttk.Button(ok_cancel_frame, text="Load", command=self._on_load)
+        self.cancel_btn = ttk.Button(ok_cancel_frame, text="Cancel", command=self._on_cancel)
+        self.load_btn.pack(side="right", padx=5)
+        self.cancel_btn.pack(side="right")
+
+    def _toggle_controls(self, enabled):
+        state = "normal" if enabled else "disabled" 
+        self.load_btn.config(state=state) 
+        self.cancel_btn.config(state=state) 
+        self.add_files_btn.config(state=state) 
+        self.add_folder_btn.config(state=state)
+        self.remove_btn.config(state=state)
+
+    def _add_files(self):
+        paths = filedialog.askopenfilenames( title="Select ARXML file(s)", parent=self, filetypes=[("ARXML files", "*.arxml")])
+        if paths:
+            self.selected_paths.extend(paths)
+            self._update_listbox()
+    
+    def _add_folder(self):
+        path = filedialog.askdirectory(title="Select a folder", parent=self)
+        if path:
+            self.selected_paths.append(path)
+            self._update_listbox()
+
+    def _remove_selected(self):
+        selected_indices = self.path_listbox.curselection()
+        for i in sorted(selected_indices, reverse=True):
+            del self.selected_paths[i]
+        self._update_listbox()
+
+    def _update_listbox(self):
+        self.path_listbox.delete(0, tk.END)
+        for path in sorted(set(self.selected_paths)):
+            self.path_listbox.insert(tk.END, path)
+
+    def _on_load(self):
+        self.result = sorted(set(self.selected_paths))
+        if not self.result:
+            messagebox.showwarning("No Selection", "Please add at least one file or folder.", parent=self)
+            return
+
+        self._toggle_controls(enabled=False)
+        self.loading_error = None
+        self.protocol("WM_DELETE_WINDOW", lambda: None) # Disable closing of the modal when loading is in progress
+
+        # This line will now correctly place the progress bar above the Load/Cancel buttons
+        self.progress_frame.pack(side="bottom", fill="x", before=self.load_btn.master, pady=(10,0))
+        self.progress_bar.start()
+        
+        self.worker_thread = threading.Thread(target=self._loading_worker, args=(self.result,))
+        self.worker_thread.start()
+        self.after(100, self._check_thread_status)
+
+    def position_center(self):
+        self.update_idletasks()
+        parent = self.master
+        x = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{x}+{y}")    
+
+    def _on_cancel(self):
+        self.result = None
+        self.destroy()
+
+    def _loading_worker(self, paths_to_load):
+        autosarfactory.reinit() #clear all the state and load the new models
+        root, status = autosarfactory.read(paths_to_load)
+        if status:
+            self.autosarRoot = root
+            self.loading_error = None
+        else:
+            self.autosarRoot = None
+            self.loading_error = "An error occurred during loading!"
+
+    def _check_thread_status(self):
+        if self.worker_thread.is_alive():
+            self.after(100, self._check_thread_status)
+            return
+
+        # The thread is finished, so stop the progress bar animation
+        self.progress_bar.stop()
+
+        if self.loading_error:
+            messagebox.showerror("Loading Failed", self.loading_error, parent=self)
+            self.progress_frame.pack_forget()
+            self._toggle_controls(enabled=True)
+            self.protocol("WM_DELETE_WINDOW", self._on_cancel) # Enable the closing of dialog when the loading is successful.
+        else:
+
+            self.progress_label.config(text="File Loading Complete!")
+            self.after(500, self.destroy)
+
 class Application(tk.Frame):
 
-    def __init__(self, root, autosar_root):
+    def __init__(self, root):
         self.__root = root
         self.__asr_explorer = None
         self.__property_view = None
@@ -24,9 +178,10 @@ class Application(tk.Frame):
         self.__search_field = None
         self.__search_view = None
         self.__search_results_label = None
+        self.__referenced_by_label = None
         self.__go_to_menu = None
         self.__asr_explorer_menu = None
-        self.__current_theme = 'scidgreen'
+        self.__dialog = None
         self.__asr_img = tk.PhotoImage(file=os.path.join(__resourcesDir__, 'autosar.png'))
         self.__initialize_ui()
         self.__asr_explorer_id_to_node_dict = {}
@@ -36,24 +191,26 @@ class Application(tk.Frame):
         self.__search_view_id_to_node_dict = {}
         self.__go_to_node_id_in_asr_explorer = None
         self.__font__ = tkFont.nametofont('TkHeadingFont')
-        self.__populate_tree(autosar_root)
-
 
     def __initialize_ui(self):
         # Configure the root object for the Application
         self.__root.iconphoto(True, self.__asr_img)
-        self.__root.title("Autosar Visualizer")
+        self.__root.title("Autosar Viewer")
         self.__root.minsize(width=800, height=600)
 
         # create ui components
         menubar = Menu(self.__root)
         filemenu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Select Theme", menu=filemenu)
-        filemenu.add_command(label="Light", command=lambda:sv_ttk.set_theme('light'))
-        filemenu.add_command(label="Dark", command=lambda:sv_ttk.set_theme('dark'))
-        self.__root.config(menu=menubar)
+        menubar.add_cascade(label="File", menu=filemenu)
+        filemenu.add_command(label="Load Models...", command=self.__open_load_dialog)
+        filemenu.add_separator()
+        filemenu.add_command(label="Exit", command=lambda:self.__client_exit(self.__root))
 
-        menubar.add_command(label="Exit", command=lambda:self.__client_exit(self.__root))
+        thememenu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Select Theme", menu=thememenu)
+        thememenu.add_command(label="Light", command=lambda:sv_ttk.set_theme('light'))
+        thememenu.add_command(label="Dark", command=lambda:sv_ttk.set_theme('dark'))
+        self.__root.config(menu=menubar)
 
         splitter = tk.PanedWindow(orient=tk.VERTICAL)
         top_frame = tk.Frame(splitter)
@@ -87,7 +244,7 @@ class Application(tk.Frame):
 
         # Create the referred_by tree
         referenced_by_frame = ttk.Frame(bottom_frame)
-        referenced_by_label = ttk.Label(referenced_by_frame, text="Referenced By")
+        self.__referenced_by_label = ttk.Label(referenced_by_frame, text="Referenced By")
         self.__referred_by_view = ttk.Treeview(referenced_by_frame, show="tree")
         self.__referred_by_view.column('#0', stretch=tk.YES, minwidth=50)
         # Add scroll bars
@@ -136,7 +293,7 @@ class Application(tk.Frame):
 
         # referenced_by layout
         referenced_by_frame.grid(row=0, column=2, sticky='nsew')
-        referenced_by_label.grid(row=0, column=2, sticky='ew')
+        self.__referenced_by_label.grid(row=0, column=2, sticky='ew')
         self.__referred_by_view.grid(row=1, column=2, sticky='nsew')
         vsb2.grid(row=1, column=3, sticky='ns')
         hsb2.grid(row=2, column=2, sticky='ew')
@@ -186,6 +343,11 @@ class Application(tk.Frame):
         self.__property_view.bind("<Button-3>", self.__on__properties_view_right_click)
         self.__asr_explorer.bind("<Button-3>", self.__on__asr_explorer_right_click)
 
+    def __open_load_dialog(self):
+        files = [] if self.__dialog is None else self.__dialog.selected_paths
+        self.__dialog = LoadModelsDialog(self.__root, files)
+        if self.__dialog.autosarRoot:
+            self._populate_tree(self.__dialog.autosarRoot)
 
     def __on_search_entry_click(self, event):
         search_string = self.__search_field.get()
@@ -329,7 +491,7 @@ class Application(tk.Frame):
                 propertyValue = v.literal if v is not None else ''
             else:
                 propertyValue = str(v) if v is not None else ''
-                if isinstance(v, Referrable):
+                if isinstance(v, autosarfactory.Referrable):
                     self.__property_view_id_to_node_dict[currentIdValue] = v
 
             # adjust column's width if necessary to fit each value
@@ -362,7 +524,7 @@ class Application(tk.Frame):
                     propertyValue = value.literal if value is not None else ''
                 else:
                     propertyValue = str(value) if value is not None else ''
-                    if isinstance(value, Referrable):
+                    if isinstance(value, autosarfactory.Referrable):
                         self.__property_view_id_to_node_dict[id] = value
 
                 # adjust column's width if necessary to fit each value
@@ -409,6 +571,9 @@ class Application(tk.Frame):
         self.__referred_by_view.delete(*self.__referred_by_view.get_children())
         self.__referred_by_view_id_to_node_dict.clear()
 
+        self.__referenced_by_label.configure(text="Referenced By({} hits)".format(str(len(node.referenced_by))))
+        self.__referenced_by_label.update()
+
         id = 1
         for ref in node.referenced_by:
             text = str(ref)
@@ -426,8 +591,19 @@ class Application(tk.Frame):
             self.__referred_by_view_id_to_node_dict[id] = ref
             id += 1
 
+    def __init_tree(self):
+        # clear all items in tree if it exists
+        self.__asr_explorer_id_to_node_dict.clear()
+        self.__asr_explorer_node_to_id_dict.clear()
+        self.__referred_by_view_id_to_node_dict.clear()
+        self.__property_view_id_to_node_dict.clear()
+        self.__search_view_id_to_node_dict.clear()
+        if self.__asr_explorer.get_children():
+            self.__asr_explorer.delete(*self.__asr_explorer.get_children())
+            self.__asr_explorer.update()
 
-    def __populate_tree(self, autosar_root):
+    def _populate_tree(self, autosar_root):
+        self.__init_tree()
         idCounter = itertools.count()
         id = next(idCounter)
         root_tree = self.__asr_explorer.insert('', 'end', iid=id, text="AutosarRoot", values=('AUTOSAR'))
@@ -451,7 +627,7 @@ class Application(tk.Frame):
 
         if node.name is not None:
             element_text = node.name
-        elif isinstance(node, EcucParameterValue) or isinstance(node, EcucAbstractReferenceValue):
+        elif isinstance(node, autosarfactory.EcucParameterValue) or isinstance(node, autosarfactory.EcucAbstractReferenceValue):
             defRef = node._node.find('{*}DEFINITION-REF')
             if defRef is not None and defRef.text != '' and '/' in defRef.text:
                 element_text = defRef.text.split("/")[-1]
@@ -487,9 +663,9 @@ class Application(tk.Frame):
         root.destroy()
 
 
-def show_in_ui(autosarRoot):
+def __setup_ui() -> Application:
     win = tk.Tk()
-    Application(win, autosarRoot)
+    app = Application(win)
 
     # read theme preference
     pref_file = os.path.join(Path(__file__).resolve().parent, 'AutosarUI_pref.ini')
@@ -510,3 +686,9 @@ def show_in_ui(autosarRoot):
 
     win.bind("<Destroy>", on_destroy)
     win.mainloop()
+    return app
+
+def main():
+    __setup_ui()
+
+main()

@@ -1,6 +1,6 @@
 [![Build Actions Status](https://github.com/girishchandranc/autosarfactory/workflows/Build/badge.svg)](https://github.com/girishchandranc/autosarfactory/actions)
 # Autosar Modelling Tool
-AutosarFactory provides nice methods to read/create/modify AUTOSAR compliant arxml files. The folder `autosarfactory` contains the autosarfactory implementation with respect to the schema corresponding to the latest AUTOSAR release. Please check the folder `autosar_releases` for previous AUTOSAR releases
+AutosarFactory provides APIs to read/create/modify AUTOSAR compliant arxml files. The folder `autosarfactory` contains the autosarfactory implementation with respect to the schema corresponding to the latest AUTOSAR release. Please check the folder `autosar_releases` for previous AUTOSAR releases
 
 ## How to use
 - Clone the repository.
@@ -123,21 +123,21 @@ swc = autosarfactory.get_node('/Swcs/swc1')
 autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 ```
 
-### Autosar visualizer
-The package also includes a graphical visualizer for the Autosar models which can be simply opened by passing the autosar root to the method `show_in_ui`.
+### Autosar Viewer
+The package also includes a graphical viewer for the Autosar models which can be simply opened by executing the following command.
 For example:
-```python
-files = ['component.arxml', 'datatypes.arxml']
-root,status = autosarfactory.read(files)
-autosar_ui.show_in_ui(root)
+```
+$ python -m autosarfactory.autosar_ui
 ```
 
-Please see below a screenshot of the visualizer.
+File(s) can be loaded using the File->Load Model(s) menu item.
 
-![AutosarVisualizer-2021-01-26 130700](https://user-images.githubusercontent.com/55708936/105837616-a1acdd00-5fd7-11eb-92ee-6255ae202749.jpg)
+Please see below a screenshot of the viewer.
+
+![Autosar Viewer](./images/AutosarViewer.png)
 
 
-The visualizer mainly consists of 4 views and a menu bar.
+The viewer mainly consists of 4 views and a menu bar.
 - Autosar Explorer - A simple tree which shows all elements in the model.
 - Property view - Info about property and its corresponding values of the selected element in autosar explorer.
 - Referenced by view - This views list elements which references the selected element in autosar explorer.

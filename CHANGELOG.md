@@ -64,3 +64,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.6.2]() - 2026-01-03
 - Optimized the save actions. The library no longer tries to write the complete element tree, but rather only updates where it's required. This has made a significant performance improvement.
 - Minor UI updates
+
+## [0.6.3]() - 2026-01-16
+- Major UI updates. Autosar viewer can now be opened as standalone tool and file(s) can loaded.
