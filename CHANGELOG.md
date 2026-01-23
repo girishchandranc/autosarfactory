@@ -65,5 +65,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 - Optimized the save actions. The library no longer tries to write the complete element tree, but rather only updates where it's required. This has made a significant performance improvement.
 - Minor UI updates
 
-## [0.6.3]() - 2026-01-16
+## [0.6.3]() - 2026-01-23
 - Major UI updates. Autosar viewer can now be opened as standalone tool and file(s) can loaded.
+- Interactive graph can be generated for the Autosar Arxml files. Please see the readMe for more information.

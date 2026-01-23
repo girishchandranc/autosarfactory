@@ -127,7 +127,7 @@ autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 The package also includes a graphical viewer for the Autosar models which can be simply opened by executing the following command.
 For example:
 ```
-$ python -m autosarfactory.autosar_ui
+$ python -m autosarfactory.ui.autosar_ui
 ```
 
 File(s) can be loaded using the File->Load Model(s) menu item.
@@ -142,6 +142,19 @@ The viewer mainly consists of 4 views and a menu bar.
 - Property view - Info about property and its corresponding values of the selected element in autosar explorer.
 - Referenced by view - This views list elements which references the selected element in autosar explorer.
 - Search view - Provision to search any elements in the model. The type of search can be selected through a combobox at the top of the view. There are 3 different types of search available: by the element short name, by a regular expression applied to the name of the element or by the Autosar type of the element.
+
+#### Interactive Graph Visualization
+
+Bring your AUTOSAR models to life by generating interactive graphs for any model element. This feature provides a dynamic, explorable map of the element's hierarchy and connections, making it easier to understand complex relationships within your model.
+
+To generate a graph:
+
+- In the tree viewer, right-click the model element you wish to visualize.
+- Select `Generate Graph` from the context menu.
+
+The generated graph shows all the child/reference relationship, and has a possibility to filter element by name and view it's relationship(which can extended using the depth option where the relationship grows for eg: From a ComSignal to Port), can pan, zoom, and interact with the nodes to inspect your model in greater detail. 
+
+If you wish a CLI mode of graph generation, it's also possible by importing the file `autosarfactory.ui.graph_gen` and making a call to the API `graph_gen.create_graph_report`.
 
 ## Examples
 Please check the script inside the `Examples` folder which creates a basic communication matrix. 
