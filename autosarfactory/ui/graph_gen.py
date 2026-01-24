@@ -3,9 +3,10 @@ import json
 import argparse
 import glob
 from autosarfactory import autosarfactory
+from enum import Enum
 
 def __get_label_name(node):
-    return node.__class__.__name__ if node.name is None else (node.__class__.__name__ + '\n' + node.name)
+    return node.__class__.__name__ if node.name is None else (node.name + '('+node.__class__.__name__ + ')')
 
 def __build_nodes_map(node:autosarfactory.AutosarNode, nodes_map: dict, edges: list):
     # Add the child nodes
@@ -22,21 +23,55 @@ def __build_nodes_map(node:autosarfactory.AutosarNode, nodes_map: dict, edges: l
             continue
         elif isinstance(v, autosarfactory.EcucAbstractReferenceValue) and v.get_value() != None:
             edge = v.get_value().get_target() if isinstance(v, autosarfactory.EcucInstanceReferenceValue) else v.get_value()
-            nodes_map[edge.get_unique_hash()] = {'id': edge.get_unique_hash(), 'label': __get_label_name(edge)}
-            edges.append({'from': node.get_unique_hash(), 'to': edge.get_unique_hash(), 'dashes': True, 'label': v.get_definition_as_string().split("/")[-1], 'font': {'align': 'middle', 'size': 10} })
+            nodes_map[edge.get_unique_hash()] = {'id': edge.get_unique_hash(), 
+                                                 'label': __get_label_name(edge), 
+                                                 'properties': __get_properties(edge),
+                                                 'path' : edge.path}
+            edges.append({'from': node.get_unique_hash(), 
+                          'to': edge.get_unique_hash(), 
+                          'dashes': True, 
+                          'label': v.get_definition_as_string().split("/")[-1], 'font': {'align': 'middle', 'size': 10}})
             __build_nodes_map(edge, nodes_map, edges)
         else:
-            nodes_map[v.get_unique_hash()] = {'id': v.get_unique_hash(), 'label': __get_label_name(v)}
-            edges.append({'from': node.get_unique_hash(), 'to': v.get_unique_hash(), 'dashes': False})
+            nodes_map[v.get_unique_hash()] = {'id': v.get_unique_hash(), 
+                                              'label': __get_label_name(v),
+                                              'properties': __get_properties(v),
+                                              'path' : v.path}
+            edges.append({'from': node.get_unique_hash(), 
+                          'to': v.get_unique_hash(), 
+                          'dashes': False})
             __build_nodes_map(v, nodes_map, edges)
 
     # Add the referenced nodes
     for k,v in node.get_property_values().items():
         if isinstance(v, autosarfactory.AutosarNode):
-            nodes_map[v.get_unique_hash()] = {'id': v.get_unique_hash(), 'label': __get_label_name(v)}
-            edges.append({'from': node.get_unique_hash(), 'to': v.get_unique_hash(), 'dashes': True, 'label': str(k), 'font': {'align': 'middle', 'size': 10} })
+            nodes_map[v.get_unique_hash()] = {'id': v.get_unique_hash(), 
+                                              'label': __get_label_name(v),
+                                              'properties': __get_properties(v),
+                                              'path' : v.path}
+            edges.append({'from': node.get_unique_hash(), 
+                          'to': v.get_unique_hash(), 
+                          'dashes': True, 
+                          'label': str(k), 'font': {'align': 'middle', 'size': 10}})
             __build_nodes_map(v, nodes_map, edges)
 
+def __get_properties(node: autosarfactory.AutosarNode):
+    properties = {}
+    if isinstance(node, autosarfactory.EcucContainerValue):
+        params = [p for p in node.get_parameterValues() if p.get_value() is not None]
+        for p in params:
+            value = ''
+            if isinstance(p, autosarfactory.EcucTextualParamValue):
+                value = p.get_value()
+            elif isinstance(p, autosarfactory.EcucNumericalParamValue):
+                value = p.get_value().get()
+            properties[p.get_definition_as_string().split("/")[-1]] = value
+
+    for k,v in node.get_property_values().items():
+        if isinstance(v, (str, int, float, bool, Enum)) and v != '' and k != 'File' and k!= 'ShortName':
+            properties[k] = v.literal if isinstance(v, Enum) else v
+    
+    return properties
 
 def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_report.html'):
     """
@@ -45,7 +80,10 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
     nodes_map = {}
     edges = []
 
-    nodes_map[node.get_unique_hash()] = {'id': node.get_unique_hash(), 'label': node.__class__.__name__ + '\n' + node.name if node.name is not None else ''}
+    nodes_map[node.get_unique_hash()] = {'id': node.get_unique_hash(), 
+                                         'label': node.__class__.__name__ + '\n' + node.name if node.name is not None else '',
+                                         'properties': __get_properties(node),
+                                         'path' : node.path}
     __build_nodes_map(node, nodes_map, edges)
 
     nodes = list(nodes_map.values())
@@ -127,6 +165,45 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
             .legend-line { border-top-width: 2px; width: 40px; margin-right: 10px; }
             .legend-line.solid { border-top-style: solid; border-top-color: #2B2B2B; }
             .legend-line.dashed { border-top-style: dashed; border-top-color: #007bff; }
+
+            /* Context Menu Styles */
+            #context-menu {
+                display: none;
+                position: fixed;
+                background-color: white;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                z-index: 10001;
+                min-width: 180px;
+                padding: 5px 0;
+            }
+
+            .context-menu-item {
+                padding: 10px 15px;
+                cursor: pointer;
+                font-size: 14px;
+                color: #333;
+                border-bottom: 1px solid #eee;
+            }
+
+            .context-menu-item:last-child {
+                border-bottom: none;
+            }
+
+            .context-menu-item:hover {
+                background-color: #f0f0f0;
+            }
+
+            .context-menu-item:active {
+                background-color: #e0e0e0;
+            }
+
+            .context-menu-separator {
+                height: 1px;
+                background-color: #ddd;
+                margin: 5px 0;
+            }
         </style>
     </head>
     <body>
@@ -138,6 +215,10 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
             <div style="display:flex; align-items:center; gap:8px;">
                 <label for="depth-input">Depth:</label>
                 <input type="number" id="depth-input" value="1" min="1" max="20">
+            </div>
+             <div style="display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="show-properties-checkbox">
+                <label for="show-properties-checkbox">Show Properties</label>
             </div>
             <button id="export-png-button" class="control-button" style="background-color: #27ae60;">Export as PNG</button>
         </div>
@@ -183,8 +264,10 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
 
 				// Create a mapping of labels to IDs
 				const labelToIdMap = {};
+                const idToLabelMap = {};
 				data.nodes.get({order: 'label'}).forEach(n => {
-					labelToIdMap[n.label.replace("\\n", "")] = n.id;
+					labelToIdMap[n.label] = n.id;
+                    idToLabelMap[n.id] = n.label
 					datalist.innerHTML += `<option value="${n.label}"></option>`;
 				});
 
@@ -262,7 +345,6 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
                 // Function to handle node selection from input
 				function handleInputSelection() {
 					const selectedLabel = input.value.trim();
-					console.log('Label selected'+ selectedLabel);
 					if (selectedLabel && labelToIdMap[selectedLabel]) {
 						const nodeId = labelToIdMap[selectedLabel];
 						network.selectNodes([nodeId]);
@@ -314,12 +396,36 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
 
                 // Disable physics after initial stabilization
 				network.once('stabilizationIterationsDone', function() {
-					console.log('calling once stabilization done');
 					network.setOptions({ physics: { enabled: false } });
 				});
 
                 // Reset button click
                 resetButton.addEventListener('click', resetGraphView);
+
+                // show properties
+                document.getElementById('show-properties-checkbox').addEventListener('change', function(e) {
+                    const showProperties = e.target.checked;
+                    const updates = data.nodes.map(node => {
+                        let newLabel = idToLabelMap[node.id];
+                        if (showProperties && node.properties) {
+                            // Append properties to label
+                            const propsText = Object.entries(node.properties)
+                                .map(([key, value]) => `${key}: ${value}`)
+                                .join('\\n');
+
+                            if (propsText) {
+                                newLabel = newLabel + '\n' + ''.padStart(newLabel.length, '-') + '\n' + propsText;
+                            }
+                        }
+
+                        return {
+                            id: node.id,
+                            label: newLabel
+                        };
+                    });
+
+                    data.nodes.update(updates);
+                });
 				
                 // Export png action
 				document.getElementById('export-png-button').addEventListener('click', function() {
@@ -366,8 +472,89 @@ def create_graph_report(node:autosarfactory.AutosarNode, output_filename='graph_
 						console.error('Export failed:', error); // for debug
 					}
 				});
+
+                // context menu
+                const contextMenu = document.getElementById('context-menu');
+                let currentContextNode = null;
+
+                // Show context menu on right-click
+                network.on("oncontext", function(params) {
+                    params.event.preventDefault();
+
+                    const nodeId = network.getNodeAt(params.pointer.DOM);
+
+                    if (nodeId) {
+                        currentContextNode = data.nodes.get(nodeId);
+
+                        // Position the menu at mouse location
+                        contextMenu.style.left = params.event.pageX + 'px';
+                        contextMenu.style.top = params.event.pageY + 'px';
+                        contextMenu.style.display = 'block';
+                    }
+                });
+
+                // Hide context menu when clicking elsewhere
+                document.addEventListener('click', function(e) {
+                    if (!contextMenu.contains(e.target)) {
+                        contextMenu.style.display = 'none';
+                        currentContextNode = null;
+                    }
+                });
+
+                // Handle context menu item clicks
+                contextMenu.addEventListener('click', function(e) {
+                    const menuItem = e.target.closest('.context-menu-item');
+                    if (!menuItem || !currentContextNode){
+                        return;
+                    }
+
+                    const action = menuItem.getAttribute('data-action');
+                    let textToCopy = '';
+
+                    switch(action) {
+                        case 'copy-path':
+                            textToCopy = currentContextNode.path;
+                            break;
+
+                        case 'copy-properties':
+                            if (currentContextNode.properties) {
+                                textToCopy = Object.entries(currentContextNode.properties)
+                                                .map(([key, value]) => `${key}: ${value}`)
+                                                .join('\\n');
+                            } else {
+                                textToCopy = 'No properties available';
+                            }
+                            break;
+                    }
+
+                    // Copy to clipboard
+                    copyToClipboard(textToCopy);
+
+                    // Hide menu
+                    contextMenu.style.display = 'none';
+                    currentContextNode = null;
+                });
+
+                // Helper function to copy text to clipboard
+                function copyToClipboard(text) {
+                    if (!text) {
+                        return;
+                    }
+
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(function() {
+                        }).catch(function(err) {
+                            console.error('Failed to copy:', err);
+                        });
+                    }
+                }
             });
         </script>
+        <div id="context-menu">
+            <div class="context-menu-item" data-action="copy-path">Copy Path</div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" data-action="copy-properties">Copy Properties</div>
+        </div>
     </body>
     </html>
     """
