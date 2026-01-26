@@ -551,6 +551,19 @@ class Application(tk.Frame):
                                         text=name,
                                         values=(propertyValue))
                 id +=1
+            
+        if isinstance(node, autosarfactory.EcucNumericalParamValue) and node.get_value() != None:
+            value = node.get_value().get()
+            col_w = self.__get_padded_text_width(value)
+            if self.__property_view.column('#1',width=None) < col_w:
+                self.__property_view.column('#1', width=col_w)
+            
+            self.__property_view.insert('',
+                                        "end",
+                                        iid=id,
+                                        text='Value',
+                                        values=(value))
+            id +=1
 
 
     def __update_search_view(self, nodes):
@@ -629,6 +642,9 @@ class Application(tk.Frame):
         if hasattr(node, 'get_children') and callable(getattr(node, 'get_children')):
             for child in node.get_children():
                 childTree = self.__create_tree_item(child, parentItem, idCounter)
+                if isinstance(child, autosarfactory.EcucParameterValue):
+                    continue
+
                 # add child nodes
                 self.__add_child(child, childTree, idCounter)
 
