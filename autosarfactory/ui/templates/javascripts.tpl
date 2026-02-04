@@ -181,7 +181,7 @@
                         .join('\\n');
 
                     if (propsText) {
-                        newLabel = newLabel + '\n' + ''.padStart(newLabel.length, '-') + '\n' + propsText;
+                        newLabel = newLabel + '\\n' + ''.padStart(newLabel.length, '-') + '\\n' + propsText;
                     }
                 }
 
