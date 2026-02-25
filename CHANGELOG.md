@@ -64,3 +64,6 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.6.2]() - 2026-01-03
 - Optimized the save actions. The library no longer tries to write the complete element tree, but rather only updates where it's required. This has made a significant performance improvement.
 - Minor UI updates
+
+## [0.6.3]() - 2026-02-25
+Fixed issues with referenced elements not saved in the model. Was a side-effect of the dirty tracking implementation

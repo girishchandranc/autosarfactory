@@ -912,3 +912,23 @@ def test_create_model_elements_from_constructor():
     assert (swcFromFile.get_ports()[0].get_shortName() == 'port')
     assert (swcFromFile.get_ports()[0].get_providedInterface().get_shortName() == 'if')
     teardown()
+
+def test_model_set_short_name_using_factory_method():
+    """
+    Tests if the short name is set properly when the factory method is used to create child elements under the node.
+    This regression is due to the case that the short name was not getting set after the XmldirtyTracker was introduced
+    """
+    componentArxml = os.path.join(resourcesDir, 'components.arxml')
+    tempDir = _create_temp_dir()
+    tempComponentArxml = os.path.join(tempDir, 'components.arxml')
+    shutil.copy(componentArxml, tempDir)
+
+    autosarfactory.read([tempComponentArxml])
+    autosarfactory.get_node('/Swcs').new_DiagnosticRoutine('dRoutine').new_RequestResult('reqRes')
+    autosarfactory.save()
+    autosarfactory.reinit()
+
+    # Read back the file and see if the element is created
+    autosarfactory.read([tempComponentArxml])
+    assert (autosarfactory.get_node('/Swcs/dRoutine/reqRes') is not None)
+    teardown()
