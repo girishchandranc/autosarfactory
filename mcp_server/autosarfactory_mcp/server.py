@@ -215,8 +215,7 @@ def get_enum(enum_name: str) -> dict:
     WRONG:  obj.set_addressingMode("CanAddressingModeType.VALUE_STANDARD")  # string — will fail
     RIGHT:  obj.set_addressingMode(CanAddressingModeType.VALUE_STANDARD)     # expression — correct
 
-    The enum class must also be imported in the generated script:
-        from autosarfactory import CanAddressingModeType
+    There is no need to import enum classes as you can instead use AF.CanAddressingModeType.VALUE_STANDARD
     """
     values = _db["enums"].get(enum_name)
     if values is None:
@@ -314,7 +313,7 @@ def read_file_script_template(input_arxmls: list[str]) -> str:
         "# --- modelling code goes here for using get_all_instances ---\n"
         "swComponentTypes = AF.get_all_instances(root, AF.ApplicationSwComponentType)\n"
         "for swc in swComponentTypes:\n"
-        "    if swc.name == 'name'\n":
+        "    if swc.name == 'name':\n"
         "        # Use ApplicationSwComponentType.new_X() / ApplicationSwComponentType.set_X() / ApplicationSwComponentType.add_X() to build the model.\n"
         "        # Call get_class('ApplicationSwComponentType') to see all available methods.\n"
         "\n"

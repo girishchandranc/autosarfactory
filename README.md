@@ -123,6 +123,12 @@ swc = autosarfactory.get_node('/Swcs/swc1')
 autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 ```
 
+### MCP server
+
+The `mcp_server/` folder contains an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes the autosarfactory API to AI coding assistants such as Claude Code. It allows an AI agent to query the full API reference, discover element hierarchies, look up enum values, and generate correct autosarfactory Python scripts — all without needing to read source code manually.
+
+For setup instructions and full details, see [mcp_server/README.md](mcp_server/README.md).
+
 ### Autosar visualizer
 The package also includes a graphical visualizer for the Autosar models which can be simply opened by passing the autosar root to the method `show_in_ui`.
 For example:
