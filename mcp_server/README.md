@@ -35,6 +35,18 @@ Add to `.vscode/mcp.json`:
 }
 ```
 
+#### Server flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--include-common-methods` | off | Include arxml infrastructure base-class methods (`set_timestamp`, `set_checksum`, `new_AdminData`, `new_Desc`, `new_Introduction`, `new_LongName`, `new_ShortNameFragment`, `new_Annotation`) in `get_class()` responses. Omitted by default to keep responses lean — these methods are rarely needed for modelling. |
+
+To enable, add the flag to the `args` array:
+
+```json
+"args": ["-m", "autosarfactory_mcp.server", "--include-common-methods"]
+```
+
 ---
 
 ### Option B — HTTP (manual server start)
@@ -107,6 +119,42 @@ python mcp_server/kb_builder/build_knowledge_base.py --docs /path/to/autosar/spe
 ```
 
 Multiple `.pkl` files are supported — the server merges them all at startup. Use distinct output names for different topic areas (e.g. `autosar_com_kb.pkl`, `autosar_dext_kb.pkl`).
+
+## Optional: ECUC parameter definition
+
+The `list_ecuc_modules`, `get_ecuc_module`, and `get_ecuc_container` tools become
+available when a pre-built `ecuc_param_def.json` file is placed in
+`mcp_server/autosarfactory_mcp/db/`. This file captures the module → container →
+parameter / reference hierarchy from AUTOSAR ECUC module definition arxml files
+and is used by the agent to look up container structure and value classes when
+generating ECU configuration scripts.
+
+Use the `ecuc_module_def_to_json.py` script (at the repo root) to generate or
+update this file from your own arxml files.
+
+### Generate from scratch
+
+```bash
+python ecuc_module_def_to_json.py <file.arxml> [<file2.arxml> ...] -o mcp_server/autosarfactory_mcp/db/ecuc_param_def.json
+```
+
+### Update specific modules (merge mode)
+
+Modules found in the arxml replace their counterpart in the existing JSON by name.
+Modules not present in the arxml are left untouched. New modules are appended.
+
+```bash
+# Update in-place
+python ecuc_module_def_to_json.py <file.arxml> --update mcp_server/autosarfactory_mcp/db/ecuc_param_def.json
+
+# Update only a specific module
+python ecuc_module_def_to_json.py <file.arxml> --module CanIf --update mcp_server/autosarfactory_mcp/db/ecuc_param_def.json
+
+# Update and write to a different file
+python ecuc_module_def_to_json.py <file.arxml> --update mcp_server/autosarfactory_mcp/db/ecuc_param_def.json -o ecuc_param_def_new.json
+```
+
+After updating the file, restart the MCP server so it reloads the new data.
 
 ## AUTOSAR element map
 
