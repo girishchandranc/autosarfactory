@@ -142,6 +142,7 @@ if _ECUC_PATH.exists():
             for c in mod.get("containers", []):
                 _index_container(c, mod["name"],
                                  parent_name=mod["name"], parent_type="EcucModuleDef")
+        print(f"[autosarfactory-mcp] ECUC loaded — {len(_ecuc_modules)} modules.", file=sys.stderr)
     except Exception as e:
         print(f"[autosarfactory-mcp] Failed to load ECUC param def: {e}", file=sys.stderr)
 else:
@@ -242,13 +243,12 @@ library for creating AUTOSAR .arxml files.
    NOTE: this is for system model configuration only — do NOT call it for ECUC configuration.
 2. ONLY call search_autosar_knowledge(query) if you need specification details or constraints.
 3. Call search_classes(keyword) for an overview if unsure what the library supports.
-4. For each element type you need to create, call find_creators_of(elementType) to discover
-   which parent class and method to use. Do this BEFORE calling get_class on any parent.
-   NEVER browse a parent class (e.g. ArPackage) to find what it can create — always go
-   bottom-up: know the element you need, then find its creator.
-5. After find_creators_of() succeeds you already have the method name and hasName — do NOT
-   call get_class(section='children'), that is redundant. Only call get_class when you need
-   cross-reference or attribute info:
+4. For each element you need to create, use the bottom-up approach — NEVER browse a parent class:
+     find_creation_chain(elementType) — full chain from ArPackage down to the element (one call)
+     find_creators_of(elementType)    — immediate parent only (use when chain is already known)
+5. The method+hasName from find_creation_chain/find_creators_of are sufficient to write the call.
+   Do NOT call get_class(section='children') after them — that is redundant.
+   Only call get_class when you need cross-reference or attribute info:
      get_class(className, section='references') — dict of {{method: targetType}} for set_/add_
      get_class(className, section='attributes') — dict of {{method: primitiveType}} for set_
      get_class(className, section='all')        — full overview (rarely needed)
@@ -338,6 +338,18 @@ Tool responses include pre-computed 'valueClass'/'parentValueClass' fields — u
 mcp = FastMCP("autosarfactory", instructions=_INSTRUCTIONS)
 _db = _load_db()
 
+# Inverted index: elementType -> list of {parentClass, method, hasName}
+# Built once at startup for O(1) creator lookup used by find_creators_of and find_creation_chain.
+_creators_index: dict[str, list] = {}
+for _cls_name, _cls_data in _db["classes"].items():
+    for _child in _cls_data.get("children", []):
+        _rt = _child["returns"]
+        _creators_index.setdefault(_rt, []).append({
+            "parentClass": _cls_name,
+            "method":      _child["method"],
+            "hasName":     _child.get("hasShortName", True),
+        })
+
 # provided tools/apis
 
 @mcp.tool()
@@ -369,19 +381,13 @@ def search_autosar_knowledge(query: str, top_k: int = 5) -> list:
 @mcp.tool()
 def get_class(class_name: str, section: str = "all") -> dict:
     """
-    Get available methods for an autosarfactory class.
+    Look up set_/add_ cross-reference and set_ attribute methods on a class.
+    For element discovery use find_creation_chain() or find_creators_of() — not this tool.
 
-    section: which method group to return — "references", "attributes", or "all" (default).
-      Use "references" to find set_/add_ cross-reference methods and their target types.
-      Use "attributes" to find set_ primitive methods and their value types.
-      Use "all"        for a full class overview (children + references + attributes).
-      NOTE: do NOT call with section="children" after find_creators_of() — the method
-            and hasName returned by find_creators_of() are already sufficient to write the call.
-
-    Response format:
-      children   — list of {method, returns, hasName}   (new_ creators)
-      references — dict  of {method: targetType}        (set_/add_ cross-references)
-      attributes — dict  of {method: primitiveType}     (set_ primitives)
+    section: "references", "attributes", or "all" (default).
+      Do NOT pass section="children" — find_creation_chain/find_creators_of cover that.
+      references — dict of {method: targetType}
+      attributes — dict of {method: primitiveType}
     """
     cls = _db["classes"].get(class_name)
     if not cls:
@@ -409,7 +415,8 @@ def get_class(class_name: str, section: str = "all") -> dict:
 def find_creators_of(class_name: str) -> list:
     """
     Find which autosarfactory classes have a new_X() method that creates the given class.
-    Call this FIRST when you know what element you need but not where to create it.
+    Use this when you know the element type but need only the immediate parent.
+    For the full creation chain from ArPackage down, use find_creation_chain(elementType) instead.
     Example: find_creators_of('CanFrameTriggering') -> CanPhysicalChannel.new_CanFrameTriggering()
 
     The returned 'method' and 'hasName' are sufficient to write the call directly:
@@ -417,15 +424,7 @@ def find_creators_of(class_name: str) -> list:
       hasName=False -> parentObj.new_X()
     Do NOT follow up with get_class(section='children') — that would be redundant.
     """
-    results = []
-    for parent_name, cls in _db["classes"].items():
-        for child in cls.get("children", []):
-            if child["returns"] == class_name:
-                results.append({
-                    "parentClass":     parent_name,
-                    "method":          child["method"],
-                    "hasName":         child.get("hasShortName", True)
-                })
+    results = _creators_index.get(class_name)
     if not results:
         similar = [k for k in _db["classes"] if class_name.lower() in k.lower()]
         return [{"info": f"No creator found for '{class_name}'.",
@@ -435,6 +434,71 @@ def find_creators_of(class_name: str) -> list:
                  ],
                  "similar_classes": similar[:5]}]
     return results
+
+
+@mcp.tool()
+def find_creation_chain(class_name: str) -> dict:
+    """
+    Return the full creation chain from ArPackage down to class_name in a single call.
+    Use this instead of chaining multiple find_creators_of() calls for deeply nested elements.
+
+    Example: find_creation_chain('ISignalTriggering') returns:
+      CanCluster (ArPackage.new_CanCluster)
+        -> CanClusterConditional (CanCluster.new_CanClusterConditional, hasName=False)
+          -> CanPhysicalChannel (CanClusterConditional.new_CanPhysicalChannel)
+            -> ISignalTriggering (CanPhysicalChannel.new_ISignalTriggering)
+
+    Each entry includes: element, createdBy, method, hasName.
+    hasName=True  -> parentObj.new_X('shortName')
+    hasName=False -> parentObj.new_X()
+
+    When one or more elements in the chain have multiple possible parents, the response
+    includes an 'ambiguous_elements' list and a 'note'. For each element in that list,
+    call find_creators_of(elementType) to see all parent options and pick the right one.
+    """
+    if class_name not in _db["classes"] and class_name not in _creators_index:
+        similar = [k for k in _db["classes"] if class_name.lower() in k.lower()]
+        return {"error": f"Class '{class_name}' not found.", "similar_classes": similar[:5]}
+
+    if class_name == "ArPackage":
+        return {"info": "ArPackage is the root — it is created by AF.new_file(), not by a parent class."}
+
+    chain: list = []
+    visited: set = set()
+    ambiguous: list = []
+    current = class_name
+
+    while current and current != "ArPackage" and current not in visited:
+        visited.add(current)
+        parents = _creators_index.get(current, [])
+        if not parents:
+            break  # reached a root element with no creator
+        if len(parents) > 1:
+            ambiguous.append(current)
+        # prefer the path through ArPackage (shortest chain); otherwise take first entry
+        parent = next((p for p in parents if p["parentClass"] == "ArPackage"), parents[0])
+        chain.insert(0, {
+            "element":   current,
+            "createdBy": parent["parentClass"],
+            "method":    parent["method"],
+            "hasName":   parent["hasName"],
+        })
+        if parent["parentClass"] == "ArPackage":
+            break
+        current = parent["parentClass"]
+
+    if not chain:
+        return {"info": f"'{class_name}' has no creation chain — it may be a root-level element."}
+
+    result: dict = {"chain": chain}
+    if ambiguous:
+        result["ambiguous_elements"] = ambiguous
+        result["note"] = (
+            "The chain above shows one valid path. "
+            "For each element listed in 'ambiguous_elements', call find_creators_of(elementType) "
+            "to see all alternative parent classes and choose the one that fits your model."
+        )
+    return result
 
 @mcp.tool()
 def search_classes(keyword: str) -> list:

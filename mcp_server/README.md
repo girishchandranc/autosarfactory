@@ -2,13 +2,37 @@
 
 The MCP server exposes the autosarfactory API to AI coding assistants such as Claude Code. It allows an AI agent to query the full API reference, discover element hierarchies, look up enum values, and generate correct autosarfactory Python scripts — all without needing to read source code manually.
 
-## Setup (VS Code / Claude Code)
+## Setup
 
 Install the required dependency first:
 
 ```bash
 pip install mcp[cli]
 ```
+
+### Claude Code (quickest)
+
+Run once from the repo root — Claude Code registers the server globally for this project:
+
+```bash
+claude mcp add autosarfactory -e PYTHONPATH=./mcp_server -- python -m autosarfactory_mcp.server
+```
+
+To include the optional `--include-common-methods` flag:
+
+```bash
+claude mcp add autosarfactory -e PYTHONPATH=./mcp_server -- python -m autosarfactory_mcp.server --include-common-methods
+```
+
+Verify the server is registered:
+
+```bash
+claude mcp list
+```
+
+---
+
+### VS Code / other MCP clients
 
 There are two ways to run the server: **stdio** (recommended, VS Code manages the process) or **HTTP** (you start the server manually and VS Code connects to it).
 
@@ -99,15 +123,16 @@ For `streamable-http` transport, use:
 
 ## What it does
 
-- **`get_class(className)`** — returns all `new_`, `set_`, `add_` methods available on a class
-- **`find_creators_of(className)`** — finds which parent class creates a given element
+- **`find_creation_chain(elementType)`** — full creation chain from ArPackage down to an element in one call (use this first)
+- **`find_creators_of(elementType)`** — immediate parent class and method for a given element type
+- **`get_class(className, section)`** — cross-reference and attribute methods on a class (`section`: `references`, `attributes`, or `all`)
 - **`search_classes(keyword)`** — finds class names matching a keyword
-- **`get_enum(enumName)`** — returns valid enum values as ready-to-use Python expressions
-- **`list_classes()` / `list_enums()`** — overview of all supported classes and enums
-- **`new_file_script_template()`** — returns the correct boilerplate for creating a new arxml file
-- **`read_file_script_template()`** — returns the correct boilerplate for reading existing arxml files
-- **`create_file()`** — writes a generated Python script to disk
+- **`get_enum(enumName)`** / **`list_enums()`** — valid enum values as ready-to-use Python expressions
+- **`get_system_element_map(useCase)`** — AUTOSAR element hierarchy for a modelling use case (SWC, CAN, Ethernet, DEXT etc.)
+- **`new_file_script_template()`** — boilerplate for creating a new arxml file
+- **`read_file_script_template()`** — boilerplate for reading and modifying existing arxml files
 - **`search_autosar_knowledge(query)`** — semantic search over AUTOSAR spec documents (requires a knowledge base, see below)
+- **`list_ecuc_modules()`** / **`get_ecuc_module()`** / **`get_ecuc_container()`** — ECUC/BSW module configuration (requires `ecuc_param_def.json`, see below)
 
 ## Optional: AUTOSAR specification knowledge base
 
