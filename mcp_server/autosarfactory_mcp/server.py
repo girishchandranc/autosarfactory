@@ -332,6 +332,59 @@ Tool responses include pre-computed 'valueClass'/'parentValueClass' fields — u
           raise RuntimeError(f"Failed to load ECUC definitions: {{ECUC_DEFS}}")
 
 
+## Visualising / sanity-checking an existing arxml
+
+When asked to visualise, summarise, or sanity-check an arxml file, write and run a
+Python script. Choose the output format based on what the user needs:
+
+  - ASCII tree  : simple overview, hierarchy + inline references. Use when the user
+                  asks for a "summary", "tree", "list", or "what's in this file".
+  - Mermaid     : boxes with connecting arrows. Use when the user asks for a "diagram",
+                  "graph", "visualise", or "show connections". Renders in VS Code with
+                  the Markdown Preview Mermaid Support extension (Ctrl+Shift+V).
+  - If unclear  : produce the ASCII tree (always readable, no tooling needed).
+
+### Setup (both flavors)
+    from autosarfactory import autosarfactory as AF
+    root, ok = AF.read(files=["path/to/file.arxml"])
+    start = AF.get_node("/MyPkg/SubPath") if user gave a sub-path else root
+
+### Tree walk rules (both flavors)
+- Walk recursively with node.get_children().
+- Only include nodes where node.get_shortName() returns non-None (named nodes).
+  Unnamed structural nodes are invisible in the output but their children are still walked.
+- Cross-references: call node.get_property_values() on each named node.
+  Any value with a non-empty .path attribute is a reference to another element.
+  Skip keys: File, ShortNameFragments, Checksum, Timestamp,
+             AdminData, LongName, Introduction, Annotations, VariationPoint.
+
+### ASCII tree format
+Indent with 2 spaces per level. Named nodes on their own line, references indented below:
+
+    [ArPackage] Components
+      [ApplicationSwComponentType] SenderSWC
+        [PPortPrototype] out_data
+          -> ProvidedInterface: /Interfaces/MyInterface
+      [SenderReceiverInterface] MyInterface
+        [VariableDataPrototype] data
+          -> Type: /DataTypes/uint8Type
+
+### Mermaid format
+    graph TD
+      classDef external fill:#f5f5f5,stroke:#aaa,stroke-dasharray:5 5
+      nN["ShortName\n(ClassName)"]
+      nP --> nC                           (containment)
+      nA -. "PropName" .-> nB             (cross-reference, dashed)
+      nExt["name\nexternal"]:::external (referenced node outside analysed subtree)
+
+### Execution
+1. Write the script to a temporary .py file using your file-writing tool.
+2. Run it with: python <script.py>
+3. Capture stdout and display it directly in the agent console so the user sees the
+   output immediately — do NOT just describe what the script would do.
+   For Mermaid output, wrap it in a ```mermaid code fence when presenting to the user.
+
+
 {_kb_instruction}"""
 
 # MCP server initialization

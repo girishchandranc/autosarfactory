@@ -1,4 +1,4 @@
-# autosarfactory MCP Server
+# AutosarFactory MCP Server
 
 The MCP server exposes the autosarfactory API to AI coding assistants such as Claude Code. It allows an AI agent to query the full API reference, discover element hierarchies, look up enum values, and generate correct autosarfactory Python scripts — all without needing to read source code manually.
 

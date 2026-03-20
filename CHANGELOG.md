@@ -68,5 +68,5 @@ Support for processing the integer attributes configured as hex, binary or octal
 ## [0.6.3]() - 2026-02-25
 Fixed issues with referenced elements not saved in the model. Was a side-effect of the dirty tracking implementation
 
-## [0.7.0]() - 2026-03-11
+## [0.7.0]() - 2026-03-20
 Added MCP server for autosarfactory
