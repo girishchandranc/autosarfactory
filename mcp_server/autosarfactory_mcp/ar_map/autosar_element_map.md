@@ -1,13 +1,20 @@
 ## AUTOSAR element map by use case
 
 ### Sender-Receiver communication (SWC to SWC, same ECU)
+depends_on: Data types
   SenderReceiverInterface, VariableDataPrototype (data element)
+    VariableDataPrototype.set_Type() MUST reference an ApplicationDataType or ImplementationDataType — NOT SwBaseType.
+    SwBaseType is a primitive C type only; use ApplicationPrimitiveDataType for scalars,
+    ApplicationRecordDataType for structs, ApplicationArrayDataType for arrays.
+    Use ApplicationDataType when user explicitly wants it or else use ImplementationDataType
+    See the "Data types" section (automatically included) for the full creation chain.
   ApplicationSwComponentType with PPortPrototype (sender) and RPortPrototype (receiver)
   SwcInternalBehavior, RunnableEntity, TimingEvent
   DataSendPoint (sender runnable), DataReceivePoint (receiver runnable)
   CompositionSwComponentType to assemble both SWCs
 
 ### Send signal from SWC over CAN bus
+depends_on: Sender-Receiver communication (SWC to SWC, same ECU)
   All of Sender-Receiver above and create delegationconnector
   instead of the assembly connection in CompositionSwComponentType, plus:
   SystemSignal, ISignal (length in bits)
@@ -24,6 +31,7 @@
   SystemMapping -> SwcToEcuMapping (SWC -> EcuInstance)
 
 ### Receive signal from CAN bus into SWC
+depends_on: Send signal from SWC over CAN bus
   Same as above but direction reversed:
   RPortPrototype, ISignalPort/IPduPort/FramePort all IN, DataReceivePoint
 
@@ -35,6 +43,8 @@
   CompositionSwComponentType to assemble both SWCs
 
 ### Call remote server from SWC over CAN bus
+depends_on: Client-Server communication (SWC to SWC)
+depends_on: Send signal from SWC over CAN bus
   All of Client-Server above and create delegationconnector
   instead of the assembly connection in CompositionSwComponentType, plus:
   All of the Send signal from SWC over CAN bus from above
@@ -195,6 +205,7 @@
   set_initValue method and the correct value container class name before generating code.
 
 ### Ethernet / SOME/IP communication
+depends_on: Sender-Receiver communication (SWC to SWC, same ECU)
   Ethernet network topology:
     EthernetCluster (hasShortName=True, in shared ArPackage)
       EthernetClusterConditional
