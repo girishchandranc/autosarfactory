@@ -65,6 +65,13 @@ Support for processing the integer attributes configured as hex, binary or octal
 - Optimized the save actions. The library no longer tries to write the complete element tree, but rather only updates where it's required. This has made a significant performance improvement.
 - Minor UI updates
 
-## [0.6.3]() - 2026-01-23
+## [0.6.3]() - 2026-02-25
+Fixed issues with referenced elements not saved in the model. Was a side-effect of the dirty tracking implementation
+
+## [0.7.0]() - 2026-03-20
+Added MCP server for autosarfactory
+
+## [0.7.1]() - 2026-08-05
 - Major UI updates. Autosar viewer can now be opened as standalone tool and file(s) can loaded.
-- Interactive graph can be generated for the Autosar Arxml files. Please see the readMe for more information.
+- UI allows to update the Autosar model and saves the changes to the file.
+- Interactive graph can be generated for the Autosar Arxml files. Please refer the README for more information.

@@ -123,8 +123,14 @@ swc = autosarfactory.get_node('/Swcs/swc1')
 autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 ```
 
-### Autosar Viewer
-The package also includes a graphical viewer for the Autosar models which can be simply opened by executing the following command.
+### MCP server
+
+The `mcp_server/` folder contains an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes the autosarfactory API to AI coding assistants such as Claude Code. It allows an AI agent to query the full API reference, discover element hierarchies, look up enum values, and generate correct autosarfactory Python scripts — all without needing to read source code manually.
+
+For setup instructions and full details, see [mcp_server/README.md](mcp_server/README.md).
+
+### Autosar visualizer
+The package also includes a graphical visualizer for the Autosar models which can be simply opened by passing the autosar root to the method `show_in_ui`.
 For example:
 ```
 $ python -m autosarfactory.ui.autosar_ui
@@ -143,6 +149,8 @@ The viewer mainly consists of 4 views and a menu bar.
 - Referenced by view - This views list elements which references the selected element in autosar explorer.
 - Search view - Provision to search any elements in the model. The type of search can be selected through a combobox at the top of the view. There are 3 different types of search available: by the element short name, by a regular expression applied to the name of the element or by the Autosar type of the element.
 
+It's also possible to edit the existing properties(via the property view), create new model elements(via the right click menu of the respective nodes) and save the updated model to the file system.
+
 #### Interactive Graph Visualization
 
 Bring your AUTOSAR models to life by generating interactive graphs for any model element. This feature provides a dynamic, explorable map of the element's hierarchy and connections, making it easier to understand complex relationships within your model.
@@ -152,7 +160,7 @@ To generate a graph:
 - In the tree viewer, right-click the model element you wish to visualize.
 - Select `Generate Graph` from the context menu.
 
-The generated graph shows all the child/reference relationship, and has a possibility to filter element by name and view it's relationship(which can extended using the depth option where the relationship grows for eg: From a ComSignal to Port), can pan, zoom, and interact with the nodes to inspect your model in greater detail. 
+The generated graph shows all the child/reference relationship, and has a possibility to filter element by name and view it's relationship, can pan, zoom, and interact with the nodes to inspect your model in greater detail. 
 
 If you wish a CLI mode of graph generation, it's also possible by importing the file `autosarfactory.ui.graph_gen` and making a call to the API `graph_gen.create_graph_report`.
 
