@@ -358,6 +358,15 @@ Tell the user to open the HTML file in a browser.
 ### Execution: write script to .py, run with python <script.py>, display output in console.
 
 
+## Plan-then-generate workflow (prompts: autosar-plan, autosar-generate)
+
+For non-trivial modelling requests prefer the two-stage workflow:
+1. autosar-plan: detect_request_type -> clarify with the user -> gather_modelling_context ->
+   write a plan per get_plan_schema() -> validate_plan(fix=True) -> user approval. No code.
+2. autosar-generate: validate_plan -> render_script_draft -> finish the script ->
+   check_generated_script -> (user approves) run it -> verify_arxml.
+
+
 {_kb_instruction}"""
 
 # MCP server initialization
@@ -486,30 +495,30 @@ def find_creation_chain(class_name: str) -> dict:
         similar = [k for k in _db["classes"] if class_name.lower() in k.lower()]
         return {"error": f"Class '{class_name}' not found.", "similar_classes": similar[:5]}
 
-    if class_name == "ArPackage":
-        return {"info": "ArPackage is the root — it is created by AF.new_file(), not by a parent class."}
+    if class_name == "ARPackage":
+        return {"info": "ARPackage is the root — it is created by AF.new_file(), not by a parent class."}
 
     chain: list = []
     visited: set = set()
     ambiguous: list = []
     current = class_name
 
-    while current and current != "ArPackage" and current not in visited:
+    while current and current != "ARPackage" and current not in visited:
         visited.add(current)
         parents = _creators_index.get(current, [])
         if not parents:
             break  # reached a root element with no creator
-        if len(parents) > 1:
+        if len({p["parentClass"] for p in parents}) > 1:
             ambiguous.append(current)
-        # prefer the path through ArPackage (shortest chain); otherwise take first entry
-        parent = next((p for p in parents if p["parentClass"] == "ArPackage"), parents[0])
+        # prefer the path through ARPackage (shortest chain); otherwise take first entry
+        parent = next((p for p in parents if p["parentClass"] == "ARPackage"), parents[0])
         chain.insert(0, {
             "element":   current,
             "createdBy": parent["parentClass"],
             "method":    parent["method"],
             "hasName":   parent["hasName"],
         })
-        if parent["parentClass"] == "ArPackage":
+        if parent["parentClass"] == "ARPackage":
             break
         current = parent["parentClass"]
 
@@ -685,7 +694,7 @@ def get_ecuc_container(container_name: str, module_name: str = "") -> list:
       # entry['parameters'][0]['valueClass']  = 'EcucNumericalParamValue'
       # entry['parameters'][0]['path']        = '/AUTOSAR/EcucDefs/Os/OsTask/OsTaskPriority'
 
-      osTaskVal = osVal.new_EcucContainerValue('MyOsTask')
+      osTaskVal = osVal.new_Container('MyOsTask')   # sub-containers: container.new_SubContainer(name)
       osTaskVal.set_definition(AF.get_node('/AUTOSAR/EcucDefs/Os/OsTask'))
 
       prio = osTaskVal.new_EcucNumericalParamValue()
@@ -825,6 +834,120 @@ def read_file_script_template(input_arxmls: list[str]) -> str:
         "\n"
         f"AF.save()\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Planner / generator workflow (autosar-plan and autosar-generate prompts)
+# ---------------------------------------------------------------------------
+from autosarfactory_mcp import workflow as _wf  # noqa: E402
+_wf.bind(sys.modules[__name__])
+from autosarfactory_mcp.workflow import check as _wf_check, context as _wf_context, detect as _wf_detect  # noqa: E402
+from autosarfactory_mcp.workflow import render as _wf_render, validate as _wf_validate, verify as _wf_verify  # noqa: E402
+
+_PROMPTS_DIR = pathlib.Path(__file__).parent / "workflow" / "prompts"
+
+
+@mcp.prompt(name="autosar-plan",
+            description="AUTOSAR Modelling Planner: turn a natural-language request into a validated, "
+                        "human-approved autosarfactory plan JSON (writes no code).")
+def autosar_plan_prompt(request: str = "") -> str:
+    text = (_PROMPTS_DIR / "autosar_plan.md").read_text(encoding="utf-8")
+    return text.replace("{{REQUEST}}", request.strip() or "(none given)")
+
+
+@mcp.prompt(name="autosar-generate",
+            description="AUTOSAR Code Generator: turn an approved autosar-plan plan into a checked, "
+                        "executable autosarfactory script and optionally run it.")
+def autosar_generate_prompt(plan: str = "") -> str:
+    text = (_PROMPTS_DIR / "autosar_generate.md").read_text(encoding="utf-8")
+    return text.replace("{{PLAN}}", plan.strip() or "(use the most recent approved plan in this conversation)")
+
+
+@mcp.tool()
+def get_plan_schema() -> str:
+    """
+    Return the JSON schema (v1) for autosar-plan modelling plans: top-level keys,
+    step actions (root, get_node, new, set_ref, add_ref, set_attr, set_value),
+    value forms and the ECUC `definition` extras. Read it before writing a plan.
+    """
+    return (_PROMPTS_DIR / "plan_schema.md").read_text(encoding="utf-8")
+
+
+@mcp.tool()
+def detect_request_type(request: str) -> dict:
+    """
+    Classify a natural-language modelling request as 'ecuc' (BSW module configuration),
+    'system' (SWCs, interfaces, networks, data types), 'mixed' or 'unknown', using
+    deterministic keyword scoring. Also returns the ECUC modules and element-map use
+    cases the request mentions. First step of the autosar-plan workflow.
+    """
+    return _wf_detect.detect(request)
+
+
+@mcp.tool()
+def gather_modelling_context(request_type: str, use_cases: list[str] | None = None,
+                             elements: list[str] | None = None, enums: list[str] | None = None,
+                             modules: list[str] | None = None, containers: list[str] | None = None,
+                             depth: int = 1) -> dict:
+    """
+    One-shot context for writing a plan, starting with an explicit mcp_connectivity block.
+
+    request_type="system": element-map sections for `use_cases`, and for each class in
+      `elements` its creation chain, ambiguous parents, references, attributes and enum
+      values; `enums` adds full enum value lists. Unknown names return did_you_mean.
+    request_type="ecuc": `modules` overview plus container details for `containers`
+      (default: all top-level containers), expanded `depth` levels of sub-containers,
+      with mandatory flags, min/max/default, enum literals, reference destinations and
+      exact definition paths.
+    """
+    return _wf_context.gather_context(request_type, use_cases, elements, enums, modules, containers, depth)
+
+
+@mcp.tool()
+def validate_plan(plan: dict | str, fix: bool = False, out: str = "") -> dict:
+    """
+    Validate an autosar-plan plan (dict, JSON string or path to a .plan.json file)
+    against the live API / ECUC data: classes, new_/set_/add_ methods and returned
+    classes, reference target types, enum literals, shortName uniqueness, step order
+    and depends_on, ECUC definition paths/types/literals/ranges and mandatory items.
+
+    fix=True applies unambiguous corrections, re-validates, returns the corrected
+    plan under 'plan' and writes it back to the file (or to `out`).
+    """
+    return _wf_validate.validate_plan(plan, fix=fix, out=out or None)
+
+
+@mcp.tool()
+def render_script_draft(plan: dict | str, draft_path: str = "", summary: bool = False) -> dict:
+    """
+    Enrich an approved plan with exact API data and render a deterministic draft
+    autosarfactory script. Returns the workflow mode (system_new, system_modify,
+    ecuc_with_defs, ecuc_defref_postprocess), the rules for that mode, enum aliases,
+    per-class API, ECUC definition constraints and the script ('script', or written
+    to `draft_path`). summary=True omits per-step code to save tokens.
+    """
+    return _wf_render.render_script(plan, draft=draft_path or None, summary=summary)
+
+
+@mcp.tool()
+def check_generated_script(script: str, plan: dict | str | None = None) -> dict:
+    """
+    Static checks on a generated autosarfactory script (path to .py or the source):
+    syntax, AF import, quoted enums, enum literals, every new_/set_/add_ name against
+    the API DB, system-vs-ECUC save rules and DEFINITION-REF ordering, and (with a plan)
+    one section per plan step. Returns {ok, errors, warnings}.
+    """
+    return _wf_check.check_script(script, plan)
+
+
+@mcp.tool()
+def verify_arxml(arxml_path: str, plan: dict | str | None = None) -> dict:
+    """
+    Confirm a generated arxml exists and loads with autosarfactory; returns size,
+    element counts and DEFINITION-REF count, and (with a plan) any planned shortNames
+    missing from the file.
+    """
+    return _wf_verify.verify_arxml(arxml_path, plan)
 
 
 if __name__ == "__main__":

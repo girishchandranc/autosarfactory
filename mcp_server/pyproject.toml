@@ -7,7 +7,7 @@ name = "autosarfactory-mcp"
 version = "0.1.0"
 description = "MCP server for autosarfactory — use with Claude Code or Github copilot or any aI tools to generate AUTOSAR arxml from natural language"
 requires-python = ">=3.10"
-dependencies = ["mcp[cli]>=1.0"]
+dependencies = ["mcp[cli]>=1.0,<2", "lxml"]
 
 [project.optional-dependencies]
 kb = ["sentence-transformers>=2.0", "numpy>=1.24", "pdfplumber>=0.9", "beautifulsoup4>=4.12"]

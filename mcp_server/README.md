@@ -7,8 +7,12 @@ The MCP server exposes the autosarfactory API to AI coding assistants such as Cl
 Install the required dependency first:
 
 ```bash
-pip install mcp[cli]
+pip install "mcp[cli]<2"
 ```
+
+> The server uses the mcp 1.x `FastMCP` API; mcp 2.x renamed it. If startup fails with
+> `PydanticUserError: A non-annotated attribute was detected`, upgrade pydantic
+> (`pip install -U pydantic`).
 
 ### Claude Code (quickest)
 
@@ -133,6 +137,33 @@ For `streamable-http` transport, use:
 - **`read_file_script_template()`** — boilerplate for reading and modifying existing arxml files
 - **`search_autosar_knowledge(query)`** — semantic search over AUTOSAR spec documents (requires a knowledge base, see below)
 - **`list_ecuc_modules()`** / **`get_ecuc_module()`** / **`get_ecuc_container()`** — ECUC/BSW module configuration (requires `ecuc_param_def.json`, see below)
+
+## Plan-then-generate workflow
+
+Two MCP **prompts** drive a human-in-the-loop workflow. MCP clients list them as prompts
+or slash commands; in Claude Code they appear as `/mcp__autosarfactory__autosar-plan` and
+`/mcp__autosarfactory__autosar-generate`.
+
+| Prompt | Argument | What it does |
+|---|---|---|
+| `autosar-plan` | `request` | Detects system vs ECUC, asks 3-5 clarifying questions, confirms scope, gathers API context, writes a plan JSON, validates and auto-corrects it, and presents it for approval. Writes no code. |
+| `autosar-generate` | `plan` (path, optional) | Re-validates the approved plan, renders a draft script, finishes it, checks it, and (after approval) runs it and verifies the arxml. |
+
+The prompts use these tools, which can also be called directly:
+
+- **`detect_request_type(request)`** — classify a request as `system`, `ecuc`, `mixed` or `unknown`
+- **`gather_modelling_context(request_type, ...)`** — all classes, creation chains, enums and ECUC container definitions for a plan in one call, with an explicit `mcp_connectivity` status
+- **`get_plan_schema()`** — the plan JSON format
+- **`validate_plan(plan, fix)`** — validate a plan against the API / ECUC data; `fix=True` auto-corrects class, method, enum and ECUC names
+- **`render_script_draft(plan, draft_path)`** — render a deterministic draft script. The mode is chosen from the plan: `system_new`, `system_modify`, `ecuc_with_defs`, or `ecuc_defref_postprocess` (writes DEFINITION-REF after save when no ECUC definition arxml is available)
+- **`check_generated_script(script, plan)`** — syntax, API-name, enum and save-order checks
+- **`verify_arxml(arxml_path, plan)`** — confirm the arxml loads and contains everything the plan creates
+
+`plan`, `script` and `arxml_path` accept file paths (resolved on the machine running the
+server) or inline content. The workflow code lives in `autosarfactory_mcp/workflow/`.
+The same workflow is available as the Claude Code project skills `/autosar-plan` and
+`/autosar-generate` (`.claude/skills/`), which call these tools in-process and work
+without a connected MCP server.
 
 ## Optional: AUTOSAR specification knowledge base
 
