@@ -30,6 +30,91 @@ def teardown(deleteTempDir = True):
     if deleteTempDir and os.path.exists(os.path.join(resourcesDir,"temp")):
         shutil.rmtree(os.path.join(resourcesDir,"temp"))
 
+class AutosarModelTestHelper:
+    """
+    Helpers used by the tests.
+    """
+    ARXML_HEADER = '<?xml version="1.0" encoding="UTF-8"?><AUTOSAR xmlns="http://autosar.org/schema/r4.0"><AR-PACKAGES>{}</AR-PACKAGES></AUTOSAR>'
+
+    @staticmethod
+    def names(nodes):
+        """
+        Sorted names of the given nodes.
+        """
+        return sorted(n.name for n in nodes)
+
+    @staticmethod
+    def write_arxml(directory, name, packages):
+        """
+        Writes an arxml file with the given AR-PACKAGE xml snippet(s) and returns its path.
+        """
+        path = os.path.join(str(directory), name)
+        with open(path, 'w') as f:
+            f.write(AutosarModelTestHelper.ARXML_HEADER.format(packages))
+        return path
+
+    @staticmethod
+    def swc_packages(*package_names):
+        """
+        AR-PACKAGE snippets. The package 'P' holds one application sw component named 'Swc', all others are empty.
+        """
+        swc = '<ELEMENTS><APPLICATION-SW-COMPONENT-TYPE><SHORT-NAME>Swc</SHORT-NAME></APPLICATION-SW-COMPONENT-TYPE></ELEMENTS>'
+        return ''.join('<AR-PACKAGE><SHORT-NAME>{}</SHORT-NAME>{}</AR-PACKAGE>'.format(n, swc if n == 'P' else '') for n in package_names)
+
+    @staticmethod
+    def swcs_in_file(file):
+        """
+        Reads the arxml file manually and returns a list of (swc name, name of the package which holds it).
+        """
+        tree = etree.parse(file, etree.XMLParser(remove_blank_text=True))
+        return [(e.find('{*}SHORT-NAME').text, e.getparent().getparent().find('{*}SHORT-NAME').text)
+                for e in tree.findall('.//{*}APPLICATION-SW-COMPONENT-TYPE')]
+
+    @staticmethod
+    def write_split_implementation_files(directory):
+        """
+        Writes two arxml files which both define the same SWC-IMPLEMENTATION /P/Impl.
+        SwcImplementation has several containment slots holding the same python type
+        (DependencyOnArtifact): generatedArtifacts, requiredArtifacts and requiredGeneratorTools.
+        file1 contributes a generated artifact (Gen1) and file2 a required artifact (Req2).
+        """
+        template = '''<?xml version="1.0" encoding="UTF-8"?>
+<AUTOSAR xmlns="http://autosar.org/schema/r4.0">
+  <AR-PACKAGES>
+    <AR-PACKAGE>
+      <SHORT-NAME>P</SHORT-NAME>
+      <ELEMENTS>
+        <SWC-IMPLEMENTATION>
+          <SHORT-NAME>Impl</SHORT-NAME>
+          <{tag}>
+            <DEPENDENCY-ON-ARTIFACT>
+              <SHORT-NAME>{name}</SHORT-NAME>
+            </DEPENDENCY-ON-ARTIFACT>
+          </{tag}>
+        </SWC-IMPLEMENTATION>
+      </ELEMENTS>
+    </AR-PACKAGE>
+  </AR-PACKAGES>
+</AUTOSAR>'''
+        file1 = os.path.join(str(directory), 'impl1.arxml')
+        file2 = os.path.join(str(directory), 'impl2.arxml')
+        with open(file1, 'w') as f:
+            f.write(template.format(tag='GENERATED-ARTIFACTS', name='Gen1'))
+        with open(file2, 'w') as f:
+            f.write(template.format(tag='REQUIRED-ARTIFACTS', name='Req2'))
+        return file1, file2
+
+    @staticmethod
+    def slot_contents(file):
+        """
+        Parses the arxml file manually and returns the short names of the DEPENDENCY-ON-ARTIFACT elements
+        found in each artifact slot of /P/Impl.
+        """
+        impl_xml = etree.parse(file, etree.XMLParser(remove_blank_text=True)).find('.//{*}SWC-IMPLEMENTATION')
+        return {tag: [e.find('{*}SHORT-NAME').text for e in impl_xml.findall('{*}' + tag + '/{*}DEPENDENCY-ON-ARTIFACT')]
+                for tag in ('GENERATED-ARTIFACTS', 'REQUIRED-ARTIFACTS', 'REQUIRED-GENERATOR-TOOLS')}
+
+
 def test_model_load_invalid_input():
     """
     Tests if the model is not loaded when invalid files are passed.
@@ -719,13 +804,15 @@ def test_model_retrieval_of_elements_with_one_concrete_sub_type():
     assert (configs[0].get_someipServiceDiscoveryPort() == 1234), 'discovery port must be 1234'
     teardown()
 
-def test_model_get_ref_as_path():
+def test_model_get_ref_proxy_node():
     """
     Tests if the model is able return the reference value as path. This will be useful if the referenced node itself is missing.
     """
     autosarfactory.read([os.path.join(resourcesDir, 'interfaces.arxml')])
     de = autosarfactory.get_node('/Interfaces/srif1/de1')
-    assert (de.get_type_as_string() == '/DataTypes/ImplTypes/uint8')
+    assert (isinstance(de.get_type(), autosarfactory.UnresolvedRef))
+    assert (de.get_type().is_proxy())
+    assert (de.get_type().path == '/DataTypes/ImplTypes/uint8')
     teardown()
 
 def test_model_set_ref_value_with_no_referable_parent():
@@ -878,6 +965,510 @@ def test_model_save_selected_files_with_element_splitted():
     # copying back the files to resoursec directory and remove the temp directory
     shutil.copy(os.path.join(tempDir, 'split1.arxml'), resourcesDir)
     shutil.copy(os.path.join(tempDir, 'split2.arxml'), resourcesDir)
+
+    teardown()
+
+def test_model_fragments_across_multiple_files():
+    """
+    Tests the contributing_files/get_fragment_files/get_fragment APIs for
+    atp-splitable nodes whose content is merged in from multiple files.
+    """
+    splitFiles = [os.path.join(resourcesDir, 'split1.arxml'), os.path.join(resourcesDir, 'split2.arxml')]
+    autosarfactory.read(splitFiles)
+    file1, file2 = splitFiles[0], splitFiles[1]
+
+    # Composition_A is defined in both files (each contributes one component), so it is merged.
+    compo:autosarfactory.CompositionSwComponentType = autosarfactory.get_node('/System/Composition_A')
+    assert (compo is not None), 'Composition_A must exist'
+    assert (compo.contributing_files == {file1, file2}), 'Composition_A content should come from both split files'
+    assert (sorted(compo.get_fragment_files()) == sorted([file1, file2])), 'get_fragment_files should list both files'    
+    assert (compo.get_fragment(compo.file) is compo), 'fragment for its own file should be the node itself'
+
+    # the other file's fragment is a distinct object parsed from that file
+    other_file = file2 if compo.file == file1 else file1
+    fragment = compo.get_fragment(other_file)
+    assert (fragment is not None), 'fragment for the other contributing file should exist'
+    assert (fragment is not compo), 'fragment object should be distinct from the merged node'
+    assert (fragment.file == other_file), 'fragment.file should match the requested file'
+
+    components = compo.get_components()
+    assert (len(components) == 2), 'both components must be present after merge'    
+
+    # ComponentPkg itself is also split (each file contributes a different element)
+    componentPkg = autosarfactory.get_node('/ComponentPkg')
+    assert (componentPkg is not None), 'ComponentPkg must exist'
+    assert (componentPkg.contributing_files == {file1, file2}), 'ComponentPkg content should come from both split files'
+
+    # a node that only exists in one file should report just that file, and have no other fragment
+    comp1:autosarfactory.ApplicationSwComponentType = autosarfactory.get_node('/ComponentPkg/Component1')
+    assert (comp1.contributing_files == {comp1.file}), 'Component1 only exists in its own file'
+    assert (comp1.get_fragment(comp1.file) is comp1), 'fragment for its own file should be itself'
+    assert (comp1.get_fragment(file2 if comp1.file == file1 else file1) is None), 'no fragment should exist for the other file'
+
+    teardown()
+
+def test_model_add_remove_elements_using_fragment_apis():
+    """
+    Tests that elements added/removed via get_fragment() ends up in the correct
+    physical file.
+    """
+    splitFiles = [os.path.join(resourcesDir, 'split1.arxml'), os.path.join(resourcesDir, 'split2.arxml')]
+    file1, file2 = splitFiles[0], splitFiles[1]
+
+    # copy the split files to a different location so we can restore them afterwards
+    tempDir = _create_temp_dir()
+    for f in splitFiles:
+        shutil.copy(f, tempDir)
+
+    autosarfactory.read(splitFiles)
+    compo:autosarfactory.CompositionSwComponentType = autosarfactory.get_node('/System/Composition_A')
+    frag1 = compo.get_fragment(file1)
+    frag2 = compo.get_fragment(file2)
+
+    # Add a new component into file2's fragment specifically (not the merged node)
+    newComp = frag2.new_Component('CPT_Component3')
+    newComp.set_type(autosarfactory.get_node('/ComponentPkg/Component2'))
+
+    # Remove the pre-existing component that belongs to file1's fragment.
+    comp1 = [c for c in frag1.get_components() if c.name == 'CPT_Component1'][0]
+    frag1.remove_component(comp1)
+
+    assert (newComp.file == file2), 'new component created via frag2 should belong to file2'
+    assert (newComp.get_parent() is frag2), 'new component should be parented under frag2'
+    assert (sorted(c.name for c in frag2.get_components()) == ['CPT_Component2', 'CPT_Component3']), 'frag2 should immediately reflect the newly added component'
+    assert (sorted(c.name for c in compo.get_components()) == ['CPT_Component2', 'CPT_Component3']), 'merged node reflects the removal of CPT_Component1 and also addition of CPT_Component3'
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if the elements are added/removed
+    tree1 = etree.parse(file1, etree.XMLParser(remove_blank_text=True))
+    tree2 = etree.parse(file2, etree.XMLParser(remove_blank_text=True))
+    names1 = [sp.find('{*}SHORT-NAME').text for sp in tree1.findall(".//{*}SW-COMPONENT-PROTOTYPE")]
+    names2 = [sp.find('{*}SHORT-NAME').text for sp in tree2.findall(".//{*}SW-COMPONENT-PROTOTYPE")]
+    assert (names1 == []), 'split1.arxml must no longer contain any SW-COMPONENT-PROTOTYPE after removing CPT_Component1'
+    assert (names2 == ['CPT_Component2', 'CPT_Component3']), 'split2.arxml must contain the original CPT_Component2 plus the newly added CPT_Component3'
+
+    typeRefs2 = [sp.find('{*}TYPE-TREF').text for sp in tree2.findall(".//{*}SW-COMPONENT-PROTOTYPE")]
+    assert ('/ComponentPkg/Component2' in typeRefs2), 'new component must reference Component2 on disk'
+
+    teardown(deleteTempDir=False)
+
+    # Read the saved files again and confirm the model reflects the change
+    autosarfactory.read(splitFiles)
+    compo = autosarfactory.get_node('/System/Composition_A')
+    reReadNames = sorted(c.name for c in compo.get_components())
+    assert (reReadNames == ['CPT_Component2', 'CPT_Component3']), 're-read model must reflect the add/remove done via fragment apis'
+    newCompReRead = [c for c in compo.get_components() if c.name == 'CPT_Component3'][0]
+    assert (newCompReRead.file == file2), 're-read CPT_Component3 must belong to split2.arxml'
+    assert (newCompReRead.get_type().name == 'Component2'), 're-read CPT_Component3 must reference Component2'
+
+    # restore the original split files and clean up the temp copies
+    shutil.copy(os.path.join(tempDir, 'split1.arxml'), resourcesDir)
+    shutil.copy(os.path.join(tempDir, 'split2.arxml'), resourcesDir)
+
+    teardown()
+
+def test_model_fragments_merge_keeps_same_typed_slots_separate():
+    """
+    Tests that merging split files does not mix up containment slots which hold the same python class type.
+    """
+    file1, file2 = AutosarModelTestHelper.write_split_implementation_files(_create_temp_dir())
+    autosarfactory.read([file1, file2])
+
+    impl = autosarfactory.get_node('/P/Impl')
+    assert (impl.is_atp_splitable()), 'Impl must be splitable'
+    assert (impl.contributing_files == {file1, file2}), 'Impl content should come from both files'
+    assert (AutosarModelTestHelper.names(impl.get_generatedArtifacts()) == ['Gen1']), 'only Gen1 belongs to generatedArtifacts'
+    assert (AutosarModelTestHelper.names(impl.get_requiredArtifacts()) == ['Req2']), 'only Req2 belongs to requiredArtifacts'
+    assert (impl.get_requiredGeneratorTools() == []), 'requiredGeneratorTools must be empty'
+
+    teardown()
+
+def test_model_fragments_add_syncs_to_correct_slot_of_merged_node():
+    """
+    Tests that an element added through a fragment is mirrored into the same slot of the merged node.
+    """
+    file1, file2 = AutosarModelTestHelper.write_split_implementation_files(_create_temp_dir())
+    autosarfactory.read([file1, file2])
+
+    impl = autosarfactory.get_node('/P/Impl')
+    frag2 = impl.get_fragment(file2)
+    tool = frag2.new_RequiredGeneratorTool('Tool2')
+
+    assert (tool.file == file2), 'the new element belongs to the fragment it was created in'
+    assert (AutosarModelTestHelper.names(impl.get_requiredGeneratorTools()) == ['Tool2']), 'Tool2 must be in requiredGeneratorTools of the merged node'
+    assert (AutosarModelTestHelper.names(impl.get_generatedArtifacts()) == ['Gen1']), 'generatedArtifacts must be unaffected'
+    assert (AutosarModelTestHelper.names(impl.get_requiredArtifacts()) == ['Req2']), 'requiredArtifacts must be unaffected'
+
+    # adding at an index goes through a different api, it must be synced as well
+    artifact = autosarfactory.DependencyOnArtifact()
+    artifact.set_shortName('Req3')
+    frag2.add_requiredArtifact_at_index(0, artifact)
+    assert (AutosarModelTestHelper.names(impl.get_requiredArtifacts()) == ['Req2', 'Req3']), 'Req3 added at an index must be in requiredArtifacts of the merged node'
+    assert (AutosarModelTestHelper.names(impl.get_generatedArtifacts()) == ['Gen1']), 'generatedArtifacts must still be unaffected'
+
+    teardown()
+
+def test_model_fragments_remove_syncs_to_correct_slot():
+    """
+    Tests that removing an element is mirrored in both directions (fragment -> merged node and merged node -> fragment)
+    and only affects the slot it was removed from.
+    """
+    file1, file2 = AutosarModelTestHelper.write_split_implementation_files(_create_temp_dir())
+    autosarfactory.read([file1, file2])
+
+    impl = autosarfactory.get_node('/P/Impl')
+    frag2 = impl.get_fragment(file2)
+
+    # Before any change, the files hold what they were written with
+    assert (AutosarModelTestHelper.slot_contents(file1) == {'GENERATED-ARTIFACTS': ['Gen1'], 'REQUIRED-ARTIFACTS': [], 'REQUIRED-GENERATOR-TOOLS': []}), 'file1 initially holds Gen1'
+    assert (AutosarModelTestHelper.slot_contents(file2) == {'GENERATED-ARTIFACTS': [], 'REQUIRED-ARTIFACTS': ['Req2'], 'REQUIRED-GENERATOR-TOOLS': []}), 'file2 initially holds Req2'
+
+    frag2.remove_requiredArtifact(frag2.get_requiredArtifacts()[0])
+    assert (frag2.get_requiredArtifacts() == []), 'Req2 must be removed from the fragment'
+    assert (impl.get_requiredArtifacts() == []), 'Req2 must be removed from the merged node as well'
+    assert (AutosarModelTestHelper.names(impl.get_generatedArtifacts()) == ['Gen1']), 'generatedArtifacts must be unaffected'
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if Req2 is removed from file2 only
+    assert (AutosarModelTestHelper.slot_contents(file1) == {'GENERATED-ARTIFACTS': ['Gen1'], 'REQUIRED-ARTIFACTS': [], 'REQUIRED-GENERATOR-TOOLS': []}), 'file1 must be unchanged'
+    assert (AutosarModelTestHelper.slot_contents(file2) == {'GENERATED-ARTIFACTS': [], 'REQUIRED-ARTIFACTS': [], 'REQUIRED-GENERATOR-TOOLS': []}), 'Req2 must be removed from file2'
+
+    # Tool2 belongs to file2, but is removed through the merged node
+    tool = frag2.new_RequiredGeneratorTool('Tool2')
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.slot_contents(file1)['REQUIRED-GENERATOR-TOOLS'] == []), 'Tool2 must not be saved to file2'
+    assert (AutosarModelTestHelper.slot_contents(file2)['REQUIRED-GENERATOR-TOOLS'] == ['Tool2']), 'Tool2 must be saved to file2'
+
+    impl.remove_requiredGeneratorTool(tool)
+    assert (impl.get_requiredGeneratorTools() == []), 'Tool2 must be removed from the merged node'
+    assert (frag2.get_requiredGeneratorTools() == []), 'Tool2 must be removed from the fragment it belongs to'
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if Tool2 is removed from file2, even though it was removed through the merged node
+    assert (AutosarModelTestHelper.slot_contents(file1) == {'GENERATED-ARTIFACTS': ['Gen1'], 'REQUIRED-ARTIFACTS': [], 'REQUIRED-GENERATOR-TOOLS': []}), 'file1 must still be unchanged'
+    assert (AutosarModelTestHelper.slot_contents(file2) == {'GENERATED-ARTIFACTS': [], 'REQUIRED-ARTIFACTS': [], 'REQUIRED-GENERATOR-TOOLS': []}), 'Tool2 must be removed from file2'
+
+    teardown()
+
+def test_model_fragments_slots_saved_to_correct_file():
+    """
+    Tests that same typed slots are saved to the right file and are read back into the right slot.
+    """
+    file1, file2 = AutosarModelTestHelper.write_split_implementation_files(_create_temp_dir())
+    autosarfactory.read([file1, file2])
+
+    impl = autosarfactory.get_node('/P/Impl')
+    impl.get_fragment(file2).new_RequiredGeneratorTool('Tool2')
+    autosarfactory.save()
+
+    # Read saved xml manually and check which file holds which slot
+    assert (AutosarModelTestHelper.slot_contents(file1) == {'GENERATED-ARTIFACTS': ['Gen1'], 'REQUIRED-ARTIFACTS': [], 'REQUIRED-GENERATOR-TOOLS': []}), 'file1 must only hold Gen1'
+    assert (AutosarModelTestHelper.slot_contents(file2) == {'GENERATED-ARTIFACTS': [], 'REQUIRED-ARTIFACTS': ['Req2'], 'REQUIRED-GENERATOR-TOOLS': ['Tool2']}), 'file2 must hold Req2 and Tool2'
+
+    teardown(deleteTempDir=False)
+
+    # Read the saved files again and confirm that everything is back in the right slot
+    autosarfactory.read([file1, file2])
+    impl = autosarfactory.get_node('/P/Impl')
+    assert (AutosarModelTestHelper.names(impl.get_generatedArtifacts()) == ['Gen1']), 're-read generatedArtifacts'
+    assert (AutosarModelTestHelper.names(impl.get_requiredArtifacts()) == ['Req2']), 're-read requiredArtifacts'
+    assert (AutosarModelTestHelper.names(impl.get_requiredGeneratorTools()) == ['Tool2']), 're-read requiredGeneratorTools'
+
+    teardown()
+
+def test_model_move_element_to_another_parent_detaches_from_old_parent():
+    """
+    Tests that an element which is added to another parent is removed from its previous parent.
+    """
+    filePath = os.path.join(str(_create_temp_dir()), 'move.arxml')
+    root = autosarfactory.new_file(filePath, defaultArPackage='P1', overWrite=True)
+    package2 = root.new_ARPackage('P2')
+    swc = root.new_ApplicationSwComponentType('Swc')
+    assert (AutosarModelTestHelper.names(root.get_elements()) == ['Swc']), 'Swc is created under P1'
+
+    # Read the file manually and return the elements held directly by P1 and by P2
+    def swcs_in_packages():
+        tree = etree.parse(filePath, etree.XMLParser(remove_blank_text=True))
+        p1 = tree.find('.//{*}AR-PACKAGES/{*}AR-PACKAGE')
+        p2 = p1.find('{*}AR-PACKAGES/{*}AR-PACKAGE')
+        names = lambda package: [e.find('{*}SHORT-NAME').text for e in package.findall('{*}ELEMENTS/{*}APPLICATION-SW-COMPONENT-TYPE')]
+        return names(p1), names(p2), len(tree.findall('.//{*}APPLICATION-SW-COMPONENT-TYPE'))
+
+    # Save before moving, so that Swc already exists in the xml of P1
+    autosarfactory.save()
+    assert (swcs_in_packages() == (['Swc'], [], 1)), 'Swc is saved under P1'
+
+    package2.add_element(swc)
+
+    assert (root.get_elements() == []), 'Swc must no longer be an element of P1'
+    assert (AutosarModelTestHelper.names(package2.get_elements()) == ['Swc']), 'Swc must be an element of P2'
+    assert (swc.get_parent() is package2), 'parent of Swc must be P2'
+    assert (swc.autosar_path == '/P1/P2/Swc'), 'path must be updated'
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if Swc is moved, and not duplicated
+    assert (swcs_in_packages() == ([], ['Swc'], 1)), 'Swc must be saved under P2 only, and must exist only once'
+
+    teardown()
+
+def test_model_fragments_clear_singular_child_via_merged_node_saved_to_fragment_file():
+    """
+    Tests that clearing a single valued child through the merged node is saved to the file which holds the child.
+    The merged node is built from file1, but the child (MC-SUPPORT) exists only in file2, so the fragment of file2
+    must be marked as modified, even though the call is made on the merged node.
+    """
+    template = '''<?xml version="1.0" encoding="UTF-8"?>
+<AUTOSAR xmlns="http://autosar.org/schema/r4.0">
+  <AR-PACKAGES>
+    <AR-PACKAGE>
+      <SHORT-NAME>P</SHORT-NAME>
+      <ELEMENTS>
+        <SWC-IMPLEMENTATION>
+          <SHORT-NAME>Impl</SHORT-NAME>{content}
+        </SWC-IMPLEMENTATION>
+      </ELEMENTS>
+    </AR-PACKAGE>
+  </AR-PACKAGES>
+</AUTOSAR>'''
+    tempDir = _create_temp_dir()
+    file1, file2 = os.path.join(tempDir, 'mc1.arxml'), os.path.join(tempDir, 'mc2.arxml')
+    with open(file1, 'w') as f:
+        f.write(template.format(content=''))
+    with open(file2, 'w') as f:
+        f.write(template.format(content='\n          <MC-SUPPORT/>'))
+
+    # Read the file manually and tell if it contains MC-SUPPORT
+    def has_mc_support(file):
+        return etree.parse(file, etree.XMLParser(remove_blank_text=True)).find('.//{*}MC-SUPPORT') is not None
+
+    assert (not has_mc_support(file1)), 'file1 does not contain MC-SUPPORT'
+    assert (has_mc_support(file2)), 'file2 contains MC-SUPPORT'
+
+    autosarfactory.read([file1, file2])
+    impl = autosarfactory.get_node('/P/Impl')
+    fragment2 = impl.get_fragment(file2)
+    assert (impl.file == file1), 'the merged node is built from file1'
+    assert (impl.get_mcSupport() is not None), 'merged node must have the mcSupport that exists in file2'
+    assert (impl.get_mcSupport().file == file2), 'mcSupport belongs to file2'
+    assert (fragment2.get_mcSupport() is impl.get_mcSupport()), 'fragment of file2 holds the same mcSupport'
+
+    # Clear the child through the merged node, though it is held by the fragment of file2.
+    impl.set_mcSupport(None)
+    assert (impl.get_mcSupport() is None), 'mcSupport must be cleared in the merged node'
+    assert (fragment2.get_mcSupport() is None), 'mcSupport must be cleared in the fragment as well'
+
+    autosarfactory.save()
+
+    # Read saved xml manually and see if MC-SUPPORT is removed from file2, and file1 is left alone
+    assert (not has_mc_support(file2)), 'MC-SUPPORT must be removed from file2'
+    assert (not has_mc_support(file1)), 'file1 must be unchanged'
+
+    teardown(deleteTempDir=False)
+
+    # Read the saved files again and confirm that the mcSupport is gone
+    autosarfactory.read([file1, file2])
+    assert (autosarfactory.get_node('/P/Impl').get_mcSupport() is None), 're-read model must not have the mcSupport'
+
+    teardown()
+
+def test_model_registry_after_rename():
+    """
+    Tests that a renamed element, its children and the nodes which refer to it are found at the new path only.
+    """
+    tempDir = _create_temp_dir()
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'rename.arxml', AutosarModelTestHelper.swc_packages('P', 'Other'))
+    autosarfactory.read([file])
+
+    swc = autosarfactory.get_node('/P/Swc')
+    swc.set_shortName('SwcNew')
+
+    assert (swc.name == 'SwcNew'), 'name must be updated'
+    assert (swc.autosar_path == '/P/SwcNew'), 'path must be updated'
+    assert (autosarfactory.get_node('/P/SwcNew') is swc), 'the element must be found at the new path'
+    assert (autosarfactory.get_node('/P/Swc') is None), 'the old path must not resolve any more'
+
+    # renaming the parent changes the path of every descendant
+    package = autosarfactory.get_node('/P')
+    port = swc.new_PPortPrototype('port1')
+    package.set_shortName('PNew')
+    assert (port.autosar_path == '/PNew/SwcNew/port1'), 'descendants must follow the renamed parent'
+    assert (autosarfactory.get_node('/PNew/SwcNew/port1') is port), 'descendants must be found at the new path'
+    assert (autosarfactory.get_node('/P/SwcNew/port1') is None), 'old path of the descendant must not resolve'
+
+    teardown()
+
+def test_model_registry_after_move_and_remove():
+    """
+    - Tests that a moved element and all of its descendants are found at their new paths.
+    - Tests that a removed element can no longer be found.
+    """
+    tempDir = _create_temp_dir()
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'move_remove.arxml',
+                        '<AR-PACKAGE><SHORT-NAME>A</SHORT-NAME><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>B</SHORT-NAME><ELEMENTS>'
+                        '<APPLICATION-SW-COMPONENT-TYPE><SHORT-NAME>Leaf</SHORT-NAME></APPLICATION-SW-COMPONENT-TYPE>'
+                        '</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AR-PACKAGE><AR-PACKAGE><SHORT-NAME>Dest</SHORT-NAME></AR-PACKAGE>')
+    autosarfactory.read([file])
+
+    # moving a package moves everything below it, not only its direct children
+    leaf = autosarfactory.get_node('/A/B/Leaf')
+    autosarfactory.get_node('/Dest').add_arPackage(autosarfactory.get_node('/A'))
+    assert (leaf.autosar_path == '/Dest/A/B/Leaf'), 'a descendant two levels down must follow the move'
+    assert (autosarfactory.get_node('/Dest/A/B/Leaf') is leaf), 'must be found at the new path'
+    assert (autosarfactory.get_node('/A/B/Leaf') is None), 'must not be found at the old path'
+
+    # remove an element, then create a new one with the same name
+    package = autosarfactory.get_node('/Dest/A/B')
+    package.remove_element(leaf)
+    assert (autosarfactory.get_node('/Dest/A/B/Leaf') is None), 'a removed element must not be found'
+    newLeaf = package.new_ApplicationSwComponentType('Leaf')
+    assert (autosarfactory.get_node('/Dest/A/B/Leaf') is newLeaf), 'the new element must be the one found, not the removed one'
+
+    teardown()
+
+def test_model_rename_and_move_are_saved():
+    """
+    - Tests that rename and move end up in the file. 
+    - Tests the updated value of element is saved before it was renamed or moved.
+    """
+    tempDir = _create_temp_dir()
+
+    # rename
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'rename_only.arxml', AutosarModelTestHelper.swc_packages('Other', 'P'))
+    autosarfactory.read([file])
+    autosarfactory.get_node('/P/Swc').set_shortName('SwcNew')
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.swcs_in_file(file) == [('SwcNew', 'P')]), 'renamed in place'
+    teardown(deleteTempDir=False)
+
+    # rename, then move
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'rename_move.arxml', AutosarModelTestHelper.swc_packages('Other', 'P'))
+    autosarfactory.read([file])
+    swc = autosarfactory.get_node('/P/Swc')
+    swc.set_shortName('SwcNew')
+    autosarfactory.get_node('/Other').add_element(swc)
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.swcs_in_file(file) == [('SwcNew', 'Other')]), 'renamed and moved'
+    teardown(deleteTempDir=False)
+
+    # move, then rename
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'move_rename.arxml', AutosarModelTestHelper.swc_packages('Other', 'P'))
+    autosarfactory.read([file])
+    swc = autosarfactory.get_node('/P/Swc')
+    autosarfactory.get_node('/Other').add_element(swc)
+    swc.set_shortName('SwcNew')
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.swcs_in_file(file) == [('SwcNew', 'Other')]), 'moved and renamed'
+    teardown(deleteTempDir=False)
+
+    # modified first, then moved
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'modify_move.arxml', AutosarModelTestHelper.swc_packages('Other', 'P'))
+    autosarfactory.read([file])
+    swc = autosarfactory.get_node('/P/Swc')
+    swc.set_category('CAT')
+    autosarfactory.get_node('/Other').add_element(swc)
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.swcs_in_file(file) == [('Swc', 'Other')]), 'must be saved under the new parent although it was modified before'
+    category = etree.parse(file).find('.//{*}APPLICATION-SW-COMPONENT-TYPE/{*}CATEGORY')
+    assert (category is not None and category.text == 'CAT'), 'the earlier modification must be saved too'
+    teardown(deleteTempDir=False)
+
+    # a child modified first, then its ancestor renamed
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'child_rename.arxml',
+                        '<AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS><APPLICATION-SW-COMPONENT-TYPE><SHORT-NAME>Swc</SHORT-NAME>'
+                        '<INTERNAL-BEHAVIORS><SWC-INTERNAL-BEHAVIOR><SHORT-NAME>Beh</SHORT-NAME><RUNNABLES><RUNNABLE-ENTITY><SHORT-NAME>Run</SHORT-NAME>'
+                        '</RUNNABLE-ENTITY></RUNNABLES></SWC-INTERNAL-BEHAVIOR></INTERNAL-BEHAVIORS></APPLICATION-SW-COMPONENT-TYPE></ELEMENTS></AR-PACKAGE>')
+    autosarfactory.read([file])
+    autosarfactory.get_node('/P/Swc/Beh/Run').set_canBeInvokedConcurrently(True)
+    autosarfactory.get_node('/P/Swc').set_shortName('SwcNew')
+    autosarfactory.save()
+    concurrently = etree.parse(file).find('.//{*}CAN-BE-INVOKED-CONCURRENTLY')
+    assert (concurrently is not None and concurrently.text == 'true'), 'a change made before renaming an ancestor must not be lost'
+
+    teardown()
+
+def test_model_references_follow_rename_and_move():
+    """
+    - Tests that references to a renamed or moved element are saved with its new path
+    - Tests also in a node which was not modified, and that the reference resolves again when the files are re-read.
+    """
+    tempDir = _create_temp_dir()
+    ref = '<DATA-TYPE-MAPPING-REF DEST="DATA-TYPE-MAPPING-SET">{}</DATA-TYPE-MAPPING-REF>'
+    targets = ('<AR-PACKAGE><SHORT-NAME>Maps</SHORT-NAME><ELEMENTS>'
+               '<DATA-TYPE-MAPPING-SET><SHORT-NAME>Ok1</SHORT-NAME></DATA-TYPE-MAPPING-SET>'
+               '<DATA-TYPE-MAPPING-SET><SHORT-NAME>Ok2</SHORT-NAME></DATA-TYPE-MAPPING-SET>'
+               '<APPLICATION-SW-COMPONENT-TYPE><SHORT-NAME>SwcOk</SHORT-NAME></APPLICATION-SW-COMPONENT-TYPE></ELEMENTS></AR-PACKAGE>'
+               '<AR-PACKAGE><SHORT-NAME>Other</SHORT-NAME></AR-PACKAGE>')
+    user = ('<AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS><COMPOSITION-SW-COMPONENT-TYPE><SHORT-NAME>A</SHORT-NAME><COMPONENTS>'
+            '<SW-COMPONENT-PROTOTYPE><SHORT-NAME>Proto</SHORT-NAME><TYPE-TREF DEST="APPLICATION-SW-COMPONENT-TYPE">/Maps/SwcOk</TYPE-TREF></SW-COMPONENT-PROTOTYPE>'
+            '</COMPONENTS><DATA-TYPE-MAPPING-REFS>' + ref.format('/Maps/Ok1') + ref.format('/Maps/Ok2') + '</DATA-TYPE-MAPPING-REFS>'
+            '</COMPOSITION-SW-COMPONENT-TYPE></ELEMENTS></AR-PACKAGE>')
+    
+    targetsFile = AutosarModelTestHelper.write_arxml(tempDir, 'targets.arxml', targets)
+    userFile = AutosarModelTestHelper.write_arxml(tempDir, 'user.arxml', user)
+
+    def refs_in_file():
+        tree = etree.parse(userFile)
+        listRefs = [e.text for e in tree.findall('.//{*}DATA-TYPE-MAPPING-REF')]
+        singleRef = tree.find('.//{*}TYPE-TREF')
+        return listRefs, singleRef.text
+
+    autosarfactory.read([targetsFile, userFile])
+    # the referencing nodes are not touched at all, only the targets change
+    autosarfactory.get_node('/Maps/Ok1').set_shortName('Ok1New')
+    autosarfactory.get_node('/Other').add_element(autosarfactory.get_node('/Maps/SwcOk'))
+    autosarfactory.save()
+    assert (refs_in_file() == (['/Maps/Ok1New', '/Maps/Ok2'], '/Other/SwcOk')), 'references must be saved with the new paths'
+    teardown(deleteTempDir=False)
+
+    # read again and confirm that the references resolve to the changed targets
+    autosarfactory.read([targetsFile, userFile])
+    comp = autosarfactory.get_node('/P/A')
+    assert ([m.name for m in comp.get_dataTypeMappings()] == ['Ok1New', 'Ok2']), 'list references must resolve'
+    assert (all(not m.is_proxy() for m in comp.get_dataTypeMappings())), 'none of them may be a proxy'
+    proto = autosarfactory.get_node('/P/A/Proto')
+    assert (proto.get_type().is_proxy() is False and proto.get_type().name == 'SwcOk'), 'Must be the SwcType'
+
+    teardown()
+
+def test_model_remove_reference_after_target_rename_or_move():
+    """
+    Tests that an entry can be removed from a reference list after the referenced element was renamed or moved, and that the removal ends up in the file.
+    """
+    tempDir = _create_temp_dir()
+    ref = '<DATA-TYPE-MAPPING-REF DEST="DATA-TYPE-MAPPING-SET">{}</DATA-TYPE-MAPPING-REF>'
+    body = ('<AR-PACKAGE><SHORT-NAME>Maps</SHORT-NAME><ELEMENTS>'
+            '<DATA-TYPE-MAPPING-SET><SHORT-NAME>Ok1</SHORT-NAME></DATA-TYPE-MAPPING-SET>'
+            '<DATA-TYPE-MAPPING-SET><SHORT-NAME>Ok2</SHORT-NAME></DATA-TYPE-MAPPING-SET></ELEMENTS></AR-PACKAGE>'
+            '<AR-PACKAGE><SHORT-NAME>Other</SHORT-NAME></AR-PACKAGE>'
+            '<AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS><COMPOSITION-SW-COMPONENT-TYPE><SHORT-NAME>A</SHORT-NAME><COMPONENTS/>'
+            '<DATA-TYPE-MAPPING-REFS>' + ref.format('/Maps/Ok1') + ref.format('/Maps/Ok2') + '</DATA-TYPE-MAPPING-REFS>'
+            '</COMPOSITION-SW-COMPONENT-TYPE></ELEMENTS></AR-PACKAGE>')
+    file = AutosarModelTestHelper.write_arxml(tempDir, 'remove_ref.arxml', body)
+    autosarfactory.read([file])
+
+    comp = autosarfactory.get_node('/P/A')
+    ok1, ok2 = autosarfactory.get_node('/Maps/Ok1'), autosarfactory.get_node('/Maps/Ok2')
+    ok1.set_shortName('Ok1New')                       # renamed
+    autosarfactory.get_node('/Other').add_element(ok2)  # moved
+
+    # The references follow the renamed / moved elements.
+    assert ([m.autosar_path for m in comp.get_dataTypeMappings()] == ['/Maps/Ok1New', '/Other/Ok2']), 'the references must report the new paths'
+    assert (autosarfactory.get_node('/Maps/Ok1New') is ok1 and autosarfactory.get_node('/Other/Ok2') is ok2), 'must be found at the new paths'
+    assert (autosarfactory.get_node('/Maps/Ok1') is None and autosarfactory.get_node('/Maps/Ok2') is None), 'must not be found at the old paths'
+    assert (comp in ok1.referenced_by and comp in ok2.referenced_by), 'the referrer must still be registered with both targets'
+
+    comp.remove_dataTypeMapping(ok1)
+    assert (ok2 in comp.get_dataTypeMappings() and ok1 not in comp.get_dataTypeMappings()), 'only the renamed one is removed'
+    comp.remove_dataTypeMapping(ok2)
+    assert (comp.get_dataTypeMappings() == []), 'dataTypeMapping must be empty'
+    assert (comp not in ok1.referenced_by and comp not in ok2.referenced_by), 'the referrer must be unregistered from both targets'
+
+    autosarfactory.save()
+    assert ([e.text for e in etree.parse(file).findall('.//{*}DATA-TYPE-MAPPING-REF')] == []), 'both references must be removed from the file'
 
     teardown()
 
