@@ -124,4 +124,10 @@ td code { font-size: .72rem; color: #c0392b; }
 .orphan-badge { display: inline-block; background: #fef3c7; color: #92400e;
                 border-radius: 3px; padding: .1rem .4rem; margin-left: .3rem;
                 font-size: .65rem; font-weight: 600; vertical-align: middle; }
+
+/* proxy (unresolved reference) in the properties panel */
+.proxy-badge { display: inline-block; background: #fee2e2; color: #b91c1c;
+               border-radius: 3px; padding: .1rem .4rem; margin-left: .3rem;
+               font-size: .65rem; font-weight: 600; vertical-align: middle; }
+#prop-refs-table td a.proxy-ref { color: #dc2626; }
 </style>

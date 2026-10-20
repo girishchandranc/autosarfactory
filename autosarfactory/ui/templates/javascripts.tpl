@@ -273,6 +273,9 @@ function render() {
 }
 
 // ── properties panel ──────────────────────────────────────────────────────────
+// a proxy node stands for a reference whose target is not loaded (autosarfactory class UnresolvedRef)
+function isProxyNode(n) { return !!n && n.tag === 'UnresolvedRef'; }
+
 function showNodeProperties(id) {
   const n = nodeById[id];
   if (!n) return;
@@ -282,12 +285,15 @@ function showNodeProperties(id) {
   content.style.display = 'block';
 
   document.getElementById('prop-name').textContent = n.label;
-  const orphan = isOrphaned(id);
+  // a proxy (unresolved reference) is not part of the tree, so "via reference" / "show in tree" do not apply to it
+  const isProxy = isProxyNode(n);
+  const orphan = isOrphaned(id) && !isProxy;
   const isEcuc = _ecucNodes.has(id);
   document.getElementById('prop-meta').innerHTML =
     '<span class="type-badge">' + esc(n.tag) + '</span>'
     + (n.defName ? '<span class="type-badge" style="background:#d1fae5;color:#065f46">' + esc(n.defName) + '</span>' : '')
     + (isEcuc ? '<span class="type-badge" style="background:#d1fae5;color:#065f46">ECUC</span>' : '')
+    + (isProxy ? '<span class="proxy-badge" title="The referenced element is not loaded">proxy: unresolved reference</span>' : '')
     + (orphan ? '<span class="orphan-badge">via reference</span>' : '');
   document.getElementById('prop-path').textContent = n.path || '';
 
@@ -357,9 +363,12 @@ function showNodeProperties(id) {
       const tn = nodeById[r.target];
       const tLabel = tn ? tn.label : r.target.substring(0, 20) + '…';
       const tPath  = tn ? tn.path  : '';
+      const tProxy = isProxyNode(tn);
       return '<tr><td class="prop-key">' + esc(r.label || '—') + '</td>'
-           + '<td><a onclick="focusNode(\'' + r.target + '\')" title="' + esc(tPath) + '">'
-           + esc(tLabel) + '</a></td></tr>';
+           + '<td><a' + (tProxy ? ' class="proxy-ref"' : '') + ' onclick="focusNode(\'' + r.target + '\')" title="' + esc(tPath) + '">'
+           + esc(tLabel) + '</a>'
+           + (tProxy ? ' <span class="proxy-badge" title="The referenced element is not loaded">proxy</span>' : '')
+           + '</td></tr>';
     }).join('');
   } else {
     rSect.style.display = 'none';

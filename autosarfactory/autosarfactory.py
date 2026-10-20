@@ -732,7 +732,7 @@ class AutosarNode:
                 if parent_node is not None:
                     parent_node.insert(idx, value._node)
                 else:
-                    AutosarNode._insert_element_after_given_tags(self._node, value._node, create_after_nodes=create_after_nodes)
+                    AutosarNode._insert_element_after_given_tags(self._node, value._node, create_after_nodes = [item_tag] + create_after_nodes)
                 idx += 1
 
     def _build_inline_child(self, child_type, file):
@@ -873,20 +873,20 @@ class AutosarNode:
             item_after = [item_tag]
         else:
             AutosarNode._remove_xml_node_if_exists(self._node, item_tag)
-            item_after = create_after_nodes + [item_tag]
+            item_after = [item_tag] + create_after_nodes
 
-        items = []
+        ref_items = {}
         for ref in ref_values:
             if ref.is_proxy():
-                items.append((ref.path, ref.dest))
+                ref_items[ref.path] = ref.dest
             else:
-                items.append((ref.autosar_path, ref.tag))
+                ref_items[ref.autosar_path] =  ref.tag
 
-        if len(items) == 0:
+        if len(ref_items) == 0:
             return
 
         parent_node = AutosarNode._add_or_get_xml_node(self._node, wrapper_tag, create_after_nodes=create_after_nodes) if wrapper_tag is not None else self._node
-        for path, dest in items:
+        for path, dest in ref_items.items():
             item_node = etree.Element(item_tag, attrib={'DEST': dest} if dest else None)
             item_node.text = path
             AutosarNode._insert_element_after_given_tags(parent_node, item_node, create_after_nodes=item_after)
@@ -363437,6 +363437,7 @@ class UnresolvedRef(AutosarNode):
     def __init__(self, path, dest):
         super().__init__()
         self.path = path
+        self.autosar_path = path
         self.dest = dest
         self.name = path
 

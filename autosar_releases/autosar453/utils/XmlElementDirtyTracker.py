@@ -17,12 +17,19 @@ class XmlElementDirtyTracker:
         Mark element and ancestors as dirty.
         element could be passed as None if it's unset/removed from the model
         """
+        if element is not None and element.is_proxy():
+            if parent is not None:
+                self.__mark_element_dirty(parent)
+            return
+
         if element is not None and len(element.referenced_by) > 0:
             for r in element.referenced_by:
                 self.__mark_element_dirty(r)
 
         if element is not None:
             self.__mark_element_dirty(element)
+            if parent is not None:
+                self.__mark_element_dirty(parent)
         elif element is None or parent == element.get_parent(): #to make sure that it's the right parent element we are marking as dirty. If it's referenced ones, this will be fixed by the above forloop of referenced_by
             self.__mark_element_dirty(parent)
         

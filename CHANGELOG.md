@@ -75,3 +75,9 @@ Added MCP server for autosarfactory
 - Major UI updates. Autosar viewer can now be opened as standalone tool and file(s) can loaded.
 - UI allows to update the Autosar model and saves the changes to the file.
 - Interactive graph can be generated for the Autosar Arxml files. Please refer the README for more information.
+
+## [0.8.0]() - 2026-10-20
+- Enhanced support for `atpSplitable` elements, i.e. model elements which are defined in more than one file.
+  - New property `contributing_files` and new api `get_fragment_files()` tell which files contribute to a model element.
+  - The api `get_fragment(file)` returns the part of the element which lives in the given file. Elements created or removed through it are saved to that file.
+- Added class `UnresolvedRef` for reference nodes which cannot be resolved to a target. Use the api `is_proxy()` to know if a node is a real object or a proxy (an instance of `UnresolvedRef`). Unresolved references are no longer lost when the file is saved.
