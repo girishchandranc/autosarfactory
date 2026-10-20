@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "AutosarFactory"
+version = "0.8.0"
+description = "Python module for modelling autosar arxml files"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Girish Chandran", email = "girishchandran.tpm@gmail.com" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "lxml>=4.6.1",
+    "sv-ttk>=2.6.1",
+    "mcp[cli]",
+]
+
+[project.urls]
+Homepage = "https://github.com/girishchandranc/autosarfactory"
+
+# The wheel contains the whole autosarfactory folder: the generated model, utils, ui and mcp_server.
+[tool.hatch.build.targets.wheel]
+packages = ["autosarfactory"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/autosarfactory",
+    "/autosar_releases",
+    "/mcp_server",
+    "/Examples",
+    "/README.md",
+    "/images",
+    "/resources",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/pyproject.toml",
+]

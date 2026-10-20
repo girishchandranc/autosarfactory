@@ -275,6 +275,29 @@ If an element can be shared/referenced from multiple places, it lives in an ArPa
 and others reference it via set_(). If it belongs exclusively to one parent, it is
 created directly on that parent via new_().
 
+## Elements split across several files (atpSplitable)
+
+- The same element (ArPackage, SWC ...) may be defined in several arxml files. read() merges
+  them into one element, and save() writes each part back to its own file.
+- node.contributing_files (a set) and node.get_fragment_files() (a list) give the files which
+  contribute to a node.
+- node.get_fragment(file) returns the part of the node which lives in that file, or None.
+  Pass the file string exactly as it was given to read().
+- To create an element in a specific file, create it on the fragment:
+  node.get_fragment(file).new_X(...). On the merged node it goes to the file the node was
+  first read from. ONLY use a fragment when the user names a target file.
+
+## Unresolved references (proxy nodes)
+
+- If only some files are read, a reference can point to an element which is not loaded. The
+  getter then returns an UnresolvedRef proxy. List getters mix proxies and real nodes in the
+  order of the file.
+- node.is_proxy() tells them apart. A proxy only has .path and .dest, no parent and no
+  children, so check is_proxy() before using a referenced node.
+- Proxies are saved back unchanged. Pass one to remove_X() to drop it, and use set_X(node) or
+  add_X(node) with a real element to replace it.
+- Reading the missing file later turns the proxies into real nodes.
+
 ## ECUC module configuration workflow
 
 The ecuc_param_def.json describes the Definition side (containers, parameters, references).
@@ -800,6 +823,7 @@ def read_file_script_template(input_arxmls: list[str]) -> str:
       element of a specific type(eg: ApplicationSwComponentType) under the parent 
       AutosarNode(eg: ArPackage or ApplicationSwComponentType). This returns a list of elements
       and you can get the right element by filtering the list by comparing the name. eg: element.name == userPassedName.
+    - AF.save() saves all the modified files. AF.save([file]) saves only the given file(s).
 
     After building the complete script, write it to a .py file using your own file-writing tool.
     """
@@ -812,7 +836,7 @@ def read_file_script_template(input_arxmls: list[str]) -> str:
         f"root, status = AF.read(files={input_arxmls})  # returns AUTOSAR root\n"
         "\n"
         "if status is False:\n"
-        "    return some error\n"
+        "    raise RuntimeError('Failed to read the input arxml file(s)')\n"
         "# --- modelling code goes here for using get_node ---\n"
         "ApplicationSwComponentType = AF.get_node('/some/path/to/ApplicationSwComponentType')\n"
         "# For each element you need to create: call find_creators_of(elementType) to discover\n"
@@ -821,7 +845,7 @@ def read_file_script_template(input_arxmls: list[str]) -> str:
         "swComponentTypes = AF.get_all_instances(root, AF.ApplicationSwComponentType)\n"
         "for swc in swComponentTypes:\n"
         "    if swc.name == 'name':\n"
-        "        # For each element you need to add: call find_creators_of(elementType) first.\n"
+        "        pass  # For each element you need to add: call find_creators_of(elementType) first.\n"
         "\n"
         f"AF.save()\n"
     )
