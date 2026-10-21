@@ -3,9 +3,10 @@
 # autosarfactory MCP server attached. Results are graded programmatically and the job
 # fails below a pass-rate threshold, so it can gate merges.
 #
-# Runs automatically on pull requests to main and in the merge queue, but only does the
-# (credit-consuming) agent work when the PR touches the MCP server, the library or this
-# workflow. Otherwise it passes immediately, so it is safe to make it a required check.
+# Runs automatically on pushes and pull requests to main / MCP-skills and in the merge
+# queue, but only does the (credit-consuming) agent work when the change touches the MCP
+# server, the library or this workflow. Otherwise it passes immediately, so it is safe to
+# make it a required check.
 #
 # Setup (Settings > Secrets and variables > Actions):
 #   secret   COPILOT_GITHUB_TOKEN  fine-grained PAT with the "Copilot Requests" permission
@@ -17,8 +18,10 @@
 name: MCP prompt evals
 
 on:
+  push:
+    branches: [ "main", "MCP-skills" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "MCP-skills" ]
   merge_group:
   workflow_dispatch:
     inputs:
@@ -49,9 +52,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcp-prompt-evals-${{ github.event.pull_request.number || github.ref }}
-  # A new push to the same PR supersedes the running eval (saves credits).
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: mcp-prompt-evals-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # A newer push to the same PR or branch supersedes the running eval (saves credits).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
   prompt-evals:
@@ -77,12 +80,19 @@ jobs:
       env:
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         MQ_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        PUSH_BEFORE_SHA: ${{ github.event.before }}
       run: |
         case "$GITHUB_EVENT_NAME" in
           workflow_dispatch) echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
           pull_request)      BASE="$PR_BASE_SHA" ;;
           merge_group)       BASE="$MQ_BASE_SHA" ;;
+          push)              BASE="$PUSH_BEFORE_SHA" ;;
         esac
+        # First push of a new branch (before = 0000...) or a base missing after a force-push:
+        # nothing reliable to diff against, so run the evals.
+        if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
         CHANGED=$(git diff --name-only "$BASE" HEAD)
         echo "$CHANGED"
         if echo "$CHANGED" | grep -qE '^(mcp_server/|autosarfactory/autosarfactory\.py$|requirements\.txt$|\.github/workflows/mcp_prompt_evals\.yml$)'; then
