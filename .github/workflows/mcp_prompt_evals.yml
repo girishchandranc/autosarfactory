@@ -1,0 +1,161 @@
+# End-to-end evals for the autosar-plan / autosar-generate MCP prompts, run by a real
+# coding agent (GitHub Copilot CLI by default, Claude Code optionally) with the
+# autosarfactory MCP server attached. Results are graded programmatically and the job
+# fails below a pass-rate threshold, so it can gate merges.
+#
+# Runs automatically on pull requests to main and in the merge queue, but only does the
+# (credit-consuming) agent work when the PR touches the MCP server, the library or this
+# workflow. Otherwise it passes immediately, so it is safe to make it a required check.
+#
+# Setup (Settings > Secrets and variables > Actions):
+#   secret   COPILOT_GITHUB_TOKEN  fine-grained PAT with the "Copilot Requests" permission
+#                                  (classic ghp_ tokens and the Actions GITHUB_TOKEN don't work)
+#   secret   ANTHROPIC_API_KEY     only needed for manual runs with agent=claude
+#   variable EVAL_MODEL            optional model for automatic runs (default: the CLI's default)
+#   variable EVAL_MIN_PASS_RATE    optional threshold for automatic runs (default 0.9)
+
+name: MCP prompt evals
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: Agent under test
+        type: choice
+        options: [copilot, claude]
+        default: copilot
+      suite:
+        description: Which prompt evals to run
+        type: choice
+        options: [all, autosar-plan, autosar-generate]
+        default: all
+      include_baseline:
+        description: Also run the no-prompt baseline (doubles the cost)
+        type: boolean
+        default: false
+      model:
+        description: Model id (empty = the agent CLI's default)
+        type: string
+        default: ""
+      min_pass_rate:
+        description: Minimum with-prompt pass rate (0-1) for the job to succeed
+        type: string
+        default: "0.9"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-prompt-evals-${{ github.event.pull_request.number || github.ref }}
+  # A new push to the same PR supersedes the running eval (saves credits).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  prompt-evals:
+    name: MCP prompt evals
+    # Fork PRs get no secrets, so they are skipped here; the merge queue still gates them.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AGENT: ${{ inputs.agent || 'copilot' }}
+      SUITE: ${{ inputs.suite || 'all' }}
+      MODEL: ${{ inputs.model || vars.EVAL_MODEL || '' }}
+      MIN_PASS_RATE: ${{ inputs.min_pass_rate || vars.EVAL_MIN_PASS_RATE || '0.9' }}
+      CONFIGS: ${{ inputs.include_baseline && 'with_skill,without_skill' || 'with_skill' }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Decide whether the change needs agent evals
+      id: changes
+      env:
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        MQ_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+      run: |
+        case "$GITHUB_EVENT_NAME" in
+          workflow_dispatch) echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          pull_request)      BASE="$PR_BASE_SHA" ;;
+          merge_group)       BASE="$MQ_BASE_SHA" ;;
+        esac
+        CHANGED=$(git diff --name-only "$BASE" HEAD)
+        echo "$CHANGED"
+        if echo "$CHANGED" | grep -qE '^(mcp_server/|autosarfactory/autosarfactory\.py$|requirements\.txt$|\.github/workflows/mcp_prompt_evals\.yml$)'; then
+          echo "relevant=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "relevant=false" >> "$GITHUB_OUTPUT"
+          echo "No MCP-related changes - agent evals skipped." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Require the agent's credentials
+      if: steps.changes.outputs.relevant == 'true'
+      env:
+        COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        if [ "$AGENT" = "copilot" ] && [ -z "$COPILOT_GITHUB_TOKEN" ]; then
+          echo "::error::Add a COPILOT_GITHUB_TOKEN secret (fine-grained PAT with the 'Copilot Requests' permission)."
+          exit 1
+        fi
+        if [ "$AGENT" = "claude" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+          echo "::error::Add an ANTHROPIC_API_KEY secret to run the evals with Claude Code."
+          exit 1
+        fi
+
+    - name: Set up Python
+      if: steps.changes.outputs.relevant == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Python dependencies (incl. the MCP SDK for the real server)
+      if: steps.changes.outputs.relevant == 'true'
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt pytest "mcp[cli]<2"
+
+    # Cheap gate before spending credits: tools and graders must be healthy.
+    - name: Deterministic MCP tests
+      if: steps.changes.outputs.relevant == 'true'
+      run: pytest mcp_server/tests -q
+
+    - name: Set up Node
+      if: steps.changes.outputs.relevant == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install the agent CLI
+      if: steps.changes.outputs.relevant == 'true'
+      # Pinned for reproducible evals; bump deliberately. The runner relies on these flags:
+      #   copilot: -p --allow-all-tools --no-ask-user --additional-mcp-config --usage-output-file
+      #   claude:  -p --output-format json --permission-mode --mcp-config --max-budget-usd
+      run: |
+        if [ "$AGENT" = "copilot" ]; then
+          npm install -g @github/copilot@1.0.101
+        else
+          npm install -g @anthropic-ai/claude-code@2.1.306
+        fi
+
+    - name: Run and grade the agent evals
+      if: steps.changes.outputs.relevant == 'true'
+      env:
+        COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        python mcp_server/evals/run_agent_evals.py "$RUNNER_TEMP/eval-workspace" \
+          --agent "$AGENT" --suite "$SUITE" --configs "$CONFIGS" --model "$MODEL" \
+          --min-pass-rate "$MIN_PASS_RATE" --parallel 3
+
+    - name: Upload eval workspace (plans, scripts, arxml, transcripts, grades)
+      if: always() && steps.changes.outputs.relevant == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: mcp-prompt-evals-${{ github.run_id }}
+        path: ${{ runner.temp }}/eval-workspace
+        retention-days: 14

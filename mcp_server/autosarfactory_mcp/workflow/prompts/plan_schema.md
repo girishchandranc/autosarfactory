@@ -13,7 +13,7 @@ The `validate_plan` tool enforces everything below.
   "request": "<the user's original request, verbatim>",
   "output": {
     "arxml": "Examples/generated/vehicle_speed.arxml",   // file the script writes
-    "script": "Examples/generated/gen_vehicle_speed.py", // file /autosar-generate writes
+    "script": "Examples/generated/gen_vehicle_speed.py", // file autosar-generate writes
     "root_package": "VehicleSpeed"                        // AF.new_file(defaultArPackage=...)
   },
   "inputs": {

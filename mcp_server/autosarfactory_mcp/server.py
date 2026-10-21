@@ -839,7 +839,11 @@ def read_file_script_template(input_arxmls: list[str]) -> str:
 # ---------------------------------------------------------------------------
 # Planner / generator workflow (autosar-plan and autosar-generate prompts)
 # ---------------------------------------------------------------------------
-from autosarfactory_mcp import workflow as _wf  # noqa: E402
+try:
+    from autosarfactory_mcp import workflow as _wf  # noqa: E402
+except ImportError:  # server.py run as a plain script instead of `python -m autosarfactory_mcp.server`
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from autosarfactory_mcp import workflow as _wf  # noqa: E402
 _wf.bind(sys.modules[__name__])
 from autosarfactory_mcp.workflow import check as _wf_check, context as _wf_context, detect as _wf_detect  # noqa: E402
 from autosarfactory_mcp.workflow import render as _wf_render, validate as _wf_validate, verify as _wf_verify  # noqa: E402

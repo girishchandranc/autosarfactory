@@ -127,6 +127,13 @@ autosarfactory.export_to_file(swc, 'swc1Export.arxml', overWrite = True)
 
 The `mcp_server/` folder contains an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes the autosarfactory API to AI coding assistants such as Claude Code. It allows an AI agent to query the full API reference, discover element hierarchies, look up enum values, and generate correct autosarfactory Python scripts — all without needing to read source code manually.
 
+The server also ships a **plan-then-generate workflow** as two MCP prompts:
+
+- **`autosar-plan`** turns a natural-language modelling request (system model or ECUC/BSW configuration) into a validated, step-by-step plan JSON through a human-in-the-loop dialogue — it writes no code.
+- **`autosar-generate`** turns the approved plan into a complete, checked autosarfactory script, and (after approval) runs it and verifies the generated arxml.
+
+Every tool and prompt can also be called without an MCP client through the offline CLI (`python -m autosarfactory_mcp.cli`). The server comes with a pytest suite for its tools (`python -m pytest mcp_server/tests`) and end-to-end evals for both prompts (`mcp_server/evals/`).
+
 For setup instructions and full details, see [mcp_server/README.md](mcp_server/README.md).
 
 ### Autosar visualizer

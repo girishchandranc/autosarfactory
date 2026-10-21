@@ -137,6 +137,7 @@ For `streamable-http` transport, use:
 - **`read_file_script_template()`** — boilerplate for reading and modifying existing arxml files
 - **`search_autosar_knowledge(query)`** — semantic search over AUTOSAR spec documents (requires a knowledge base, see below)
 - **`list_ecuc_modules()`** / **`get_ecuc_module()`** / **`get_ecuc_container()`** — ECUC/BSW module configuration (requires `ecuc_param_def.json`, see below)
+- **`get_ecuc_param_literals(paramPath)`** — valid literal strings for an `EcucEnumerationParamDef` parameter
 
 ## Plan-then-generate workflow
 
@@ -148,6 +149,10 @@ or slash commands; in Claude Code they appear as `/mcp__autosarfactory__autosar-
 |---|---|---|
 | `autosar-plan` | `request` | Detects system vs ECUC, asks 3-5 clarifying questions, confirms scope, gathers API context, writes a plan JSON, validates and auto-corrects it, and presents it for approval. Writes no code. |
 | `autosar-generate` | `plan` (path, optional) | Re-validates the approved plan, renders a draft script, finishes it, checks it, and (after approval) runs it and verifies the arxml. |
+
+The plan JSON format is documented in
+[`autosarfactory_mcp/workflow/prompts/plan_schema.md`](autosarfactory_mcp/workflow/prompts/plan_schema.md)
+and served live by the `get_plan_schema` tool.
 
 The prompts use these tools, which can also be called directly:
 
@@ -161,9 +166,42 @@ The prompts use these tools, which can also be called directly:
 
 `plan`, `script` and `arxml_path` accept file paths (resolved on the machine running the
 server) or inline content. The workflow code lives in `autosarfactory_mcp/workflow/`.
-The same workflow is available as the Claude Code project skills `/autosar-plan` and
-`/autosar-generate` (`.claude/skills/`), which call these tools in-process and work
-without a connected MCP server.
+
+### Offline CLI
+
+Every tool and both prompts can also be used without an MCP client, which is handy for
+scripting, CI, or an agent that has no MCP connection. Run from the repo root:
+
+```bash
+export PYTHONPATH=./mcp_server
+python -m autosarfactory_mcp.cli list                                    # tools and prompts
+python -m autosarfactory_mcp.cli validate_plan '{"plan": "my.plan.json", "fix": true}'
+python -m autosarfactory_mcp.cli prompt autosar-plan '{"request": "two SWCs over SR"}'
+```
+
+The CLI runs the same code in-process and prints the JSON the MCP tool would return. It
+works even when the `mcp` package is missing or incompatible. Both prompts mention it, so
+an agent following a prompt without a connected server can still call every tool.
+
+## Tests and evals
+
+- **Tool tests** (deterministic): [`tests/`](tests/) is a pytest suite covering every tool:
+  the lookup tools, the workflow tools (including rendering and running a script for every
+  generation mode), the prompts, and the offline CLI. From the repo root:
+
+  ```bash
+  python -m pytest mcp_server/tests
+  ```
+
+- **Prompt evals** (AI in the loop): [`evals/`](evals/) holds end-to-end evals for the
+  `autosar-plan` and `autosar-generate` prompts. Each comes with fixtures, a programmatic
+  grader, and scripts to build a benchmark workspace and grade it. See
+  [evals/README.md](evals/README.md).
+
+In CI, the tool tests run on every push and pull request. The agent evals use
+GitHub Copilot by default, with the real MCP server attached. They run automatically on
+pull requests and in the merge queue, so they can be a required check for merging. They
+need a `COPILOT_GITHUB_TOKEN` secret; see [evals/README.md](evals/README.md#in-github-actions).
 
 ## Optional: AUTOSAR specification knowledge base
 

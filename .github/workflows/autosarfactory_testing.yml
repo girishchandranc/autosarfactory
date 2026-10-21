@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python 3.10
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: "3.10"
     - name: Install dependencies
@@ -28,6 +28,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Test with pytest
+    - name: Test the autosarfactory library
       run: |
-        pytest
+        pytest tests
+    - name: Test the MCP server tools, prompts and eval graders
+      # Deterministic, no API key needed: every MCP tool, the offline CLI, and the
+      # prompt-eval harness (graders must score a known-good run at 100%).
+      run: |
+        pytest mcp_server/tests -v

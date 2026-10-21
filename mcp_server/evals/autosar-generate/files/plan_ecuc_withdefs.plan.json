@@ -1,0 +1,101 @@
+{
+ "schema_version": 1,
+ "request_type": "ecuc",
+ "title": "Os task (with definition arxml)",
+ "request": "eval fixture (pre-approved plan)",
+ "output": {
+  "arxml": "__OUTDIR__/os_cfg_defs.arxml",
+  "script": "__OUTDIR__/gen_os_cfg_defs.py",
+  "root_package": "EcucConfig"
+ },
+ "inputs": {
+  "read_arxmls": [],
+  "ecuc_definition_arxmls": [
+   "__OUTDIR__/defs.arxml"
+  ]
+ },
+ "assumptions": [],
+ "steps": [
+  {
+   "id": "S1",
+   "action": "root",
+   "var": "pkg",
+   "class": "ARPackage",
+   "args": {
+    "name": "EcucConfig"
+   },
+   "depends_on": [],
+   "description": "Root package"
+  },
+  {
+   "id": "S2",
+   "action": "new",
+   "var": "osVal",
+   "class": "EcucModuleConfigurationValues",
+   "parent": "pkg",
+   "method": "new_EcucModuleConfigurationValues",
+   "args": {
+    "name": "Os"
+   },
+   "definition": {
+    "path": "/AUTOSAR/EcucDefs/Os",
+    "type": "EcucModuleDef"
+   },
+   "depends_on": [
+    "S1"
+   ],
+   "description": "Os module values"
+  },
+  {
+   "id": "S3",
+   "action": "set_attr",
+   "target": "osVal",
+   "method": "set_implementationConfigVariant",
+   "value": {
+    "enum": "EcucConfigurationVariantEnum.VALUE_VARIANT_PRE_COMPILE"
+   },
+   "depends_on": [
+    "S2"
+   ],
+   "description": "Config variant PRE-COMPILE"
+  },
+  {
+   "id": "S4",
+   "action": "new",
+   "var": "task1",
+   "class": "EcucContainerValue",
+   "parent": "osVal",
+   "method": "new_Container",
+   "args": {
+    "name": "Task_10ms"
+   },
+   "definition": {
+    "path": "/AUTOSAR/EcucDefs/Os/OsTask",
+    "type": "EcucParamConfContainerDef"
+   },
+   "depends_on": [
+    "S2"
+   ],
+   "description": "OsTask container"
+  },
+  {
+   "id": "S5",
+   "action": "new",
+   "var": "t1prio",
+   "class": "EcucNumericalParamValue",
+   "parent": "task1",
+   "method": "new_EcucNumericalParamValue",
+   "definition": {
+    "path": "/AUTOSAR/EcucDefs/Os/OsTask/OsTaskPriority",
+    "type": "EcucIntegerParamDef"
+   },
+   "value": {
+    "literal": 5
+   },
+   "depends_on": [
+    "S4"
+   ],
+   "description": "OsTaskPriority = 5"
+  }
+ ]
+}

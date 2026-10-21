@@ -1,0 +1,63 @@
+{
+  "skill_name": "autosar-generate",
+  "_note": "Evals for the MCP prompt 'autosar-generate'. __OUTDIR__ is replaced by the run's outputs directory; files are copied there first. Build a workspace with ../setup_runs.py, grade with ../grade_all.py.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "gen-system-sr",
+      "prompt": "Generate the autosarfactory Python script from the approved plan at __OUTDIR__/plan_system_sr.plan.json, then run it and verify the generated arxml. The plan has already been approved. This is an unattended run: do not ask me questions - treat execution as approved.",
+      "expected_output": "An executable script at the plan's output.script path that creates the arxml with every planned element (interface, data element, SWC, port), passing all static checks.",
+      "files": [
+        "files/plan_system_sr.plan.json"
+      ],
+      "expectations": [
+        "An executable Python script was produced at the plan's output.script path",
+        "check_generated_script passes with zero errors",
+        "The output arxml file was created",
+        "verify_arxml confirms the arxml loads and contains every planned shortName",
+        "The script keeps one section comment per plan step",
+        "The arxml links the P-port to the interface (PROVIDED-INTERFACE-TREF present)"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "gen-ecuc-defref",
+      "prompt": "Generate the autosarfactory Python script from the approved plan at __OUTDIR__/plan_ecuc_defref.plan.json, then run it and verify the generated arxml. No ECUC definition arxml is available. The plan has already been approved. This is an unattended run: do not ask me questions - treat execution as approved.",
+      "expected_output": "A script using DEFINITION-REF post-processing (after AF.save with explicit file list) producing an ECUC values arxml with 5 DEFINITION-REF elements.",
+      "files": [
+        "files/plan_ecuc_defref.plan.json"
+      ],
+      "expectations": [
+        "An executable Python script was produced at the plan's output.script path",
+        "check_generated_script passes with zero errors",
+        "The output arxml file was created",
+        "verify_arxml confirms the arxml loads and contains every planned shortName",
+        "The script keeps one section comment per plan step",
+        "AF.save is called with an explicit file list (never a bare AF.save())",
+        "The arxml contains exactly 5 DEFINITION-REF elements",
+        "Every DEFINITION-REF has the definition path and DEST tag the plan specifies"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "gen-ecuc-withdefs",
+      "prompt": "Generate the autosarfactory Python script from the approved plan at __OUTDIR__/plan_ecuc_withdefs.plan.json, then run it and verify the generated arxml. The ECUC definition arxml referenced by the plan exists at __OUTDIR__/defs.arxml. The plan has already been approved. This is an unattended run: do not ask me questions - treat execution as approved.",
+      "expected_output": "A script that loads defs.arxml, links values via set_definition, saves only the values file, and leaves defs.arxml untouched. The arxml has 3 DEFINITION-REF elements.",
+      "files": [
+        "files/plan_ecuc_withdefs.plan.json",
+        "files/defs.arxml"
+      ],
+      "expectations": [
+        "An executable Python script was produced at the plan's output.script path",
+        "check_generated_script passes with zero errors",
+        "The output arxml file was created",
+        "verify_arxml confirms the arxml loads and contains every planned shortName",
+        "The script keeps one section comment per plan step",
+        "AF.save is called with an explicit file list (never a bare AF.save())",
+        "The arxml contains exactly 3 DEFINITION-REF elements",
+        "Every DEFINITION-REF has the definition path and DEST tag the plan specifies",
+        "The ECUC definition arxml (defs.arxml) was not modified by the run"
+      ]
+    }
+  ]
+}

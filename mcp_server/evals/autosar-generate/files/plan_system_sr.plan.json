@@ -1,0 +1,190 @@
+{
+ "schema_version": 1,
+ "request_type": "system",
+ "title": "SR VehicleSpeed",
+ "request": "eval fixture (pre-approved plan)",
+ "output": {
+  "arxml": "__OUTDIR__/vehicle_speed.arxml",
+  "script": "__OUTDIR__/gen_vehicle_speed.py",
+  "root_package": "VehicleSpeed"
+ },
+ "inputs": {
+  "read_arxmls": [],
+  "ecuc_definition_arxmls": []
+ },
+ "assumptions": [],
+ "steps": [
+  {
+   "id": "S1",
+   "action": "root",
+   "var": "pkg",
+   "class": "ARPackage",
+   "args": {
+    "name": "VehicleSpeed"
+   },
+   "depends_on": [],
+   "description": "Root package"
+  },
+  {
+   "id": "S2",
+   "action": "new",
+   "var": "dtPkg",
+   "class": "ARPackage",
+   "parent": "pkg",
+   "method": "new_ARPackage",
+   "args": {
+    "name": "DataTypes"
+   },
+   "depends_on": [
+    "S1"
+   ],
+   "description": "DataTypes package"
+  },
+  {
+   "id": "S3",
+   "action": "new",
+   "var": "u8",
+   "class": "ImplementationDataType",
+   "parent": "dtPkg",
+   "method": "new_ImplementationDataType",
+   "args": {
+    "name": "uint8"
+   },
+   "depends_on": [
+    "S2"
+   ],
+   "description": "uint8 implementation data type"
+  },
+  {
+   "id": "S4",
+   "action": "set_attr",
+   "target": "u8",
+   "method": "set_category",
+   "value": {
+    "literal": "VALUE"
+   },
+   "depends_on": [
+    "S3"
+   ],
+   "description": "uint8 category VALUE"
+  },
+  {
+   "id": "S5",
+   "action": "new",
+   "var": "ifPkg",
+   "class": "ARPackage",
+   "parent": "pkg",
+   "method": "new_ARPackage",
+   "args": {
+    "name": "Interfaces"
+   },
+   "depends_on": [
+    "S1"
+   ],
+   "description": "Interfaces package"
+  },
+  {
+   "id": "S6",
+   "action": "new",
+   "var": "srIf",
+   "class": "SenderReceiverInterface",
+   "parent": "ifPkg",
+   "method": "new_SenderReceiverInterface",
+   "args": {
+    "name": "SrIf_Speed"
+   },
+   "depends_on": [
+    "S5"
+   ],
+   "description": "SR interface"
+  },
+  {
+   "id": "S7",
+   "action": "new",
+   "var": "de",
+   "class": "VariableDataPrototype",
+   "parent": "srIf",
+   "method": "new_DataElement",
+   "args": {
+    "name": "Speed"
+   },
+   "depends_on": [
+    "S6"
+   ],
+   "description": "Data element Speed"
+  },
+  {
+   "id": "S8",
+   "action": "set_ref",
+   "target": "de",
+   "method": "set_type",
+   "value": {
+    "var": "u8"
+   },
+   "depends_on": [
+    "S7",
+    "S3"
+   ],
+   "description": "Speed typed uint8"
+  },
+  {
+   "id": "S9",
+   "action": "new",
+   "var": "swcPkg",
+   "class": "ARPackage",
+   "parent": "pkg",
+   "method": "new_ARPackage",
+   "args": {
+    "name": "Swcs"
+   },
+   "depends_on": [
+    "S1"
+   ],
+   "description": "Swcs package"
+  },
+  {
+   "id": "S10",
+   "action": "new",
+   "var": "swc",
+   "class": "ApplicationSwComponentType",
+   "parent": "swcPkg",
+   "method": "new_ApplicationSwComponentType",
+   "args": {
+    "name": "SpeedSender"
+   },
+   "depends_on": [
+    "S9"
+   ],
+   "description": "Sender SWC"
+  },
+  {
+   "id": "S11",
+   "action": "new",
+   "var": "pp",
+   "class": "PPortPrototype",
+   "parent": "swc",
+   "method": "new_PPortPrototype",
+   "args": {
+    "name": "PP_Speed"
+   },
+   "depends_on": [
+    "S10"
+   ],
+   "description": "P-port"
+  },
+  {
+   "id": "S12",
+   "action": "set_ref",
+   "target": "pp",
+   "method": "set_providedInterface",
+   "value": {
+    "var": "srIf"
+   },
+   "depends_on": [
+    "S11",
+    "S6"
+   ],
+   "description": "P-port provides SR interface"
+  }
+ ]
+}

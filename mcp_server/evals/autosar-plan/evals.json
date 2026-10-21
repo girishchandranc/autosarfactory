@@ -1,0 +1,61 @@
+{
+  "skill_name": "autosar-plan",
+  "_note": "Evals for the MCP prompt 'autosar-plan'. __OUTDIR__ is replaced by the run's outputs directory; files are copied there first. Build a workspace with ../setup_runs.py, grade with ../grade_all.py.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "plan-system-sr",
+      "prompt": "I'm modelling a new AUTOSAR system with autosarfactory. Plan it for me (plan only, no code): a sender SWC 'SpeedSender' with P-port 'PP_Speed' and a receiver SWC 'SpeedReceiver' with R-port 'RP_Speed', communicating over a sender-receiver interface 'SrIf_Speed' with one data element 'Speed' typed uint8 (an ImplementationDataType with category VALUE). Output arxml: __OUTDIR__/vehicle_speed.arxml, root package 'VehicleSpeed'. This is an unattended run: do not ask me questions - make reasonable choices, record them as assumptions in the plan, and treat the scope and the final plan as approved by me.",
+      "expected_output": "A validated plan JSON (vehicle_speed.plan.json) with request_type system, creating the interface, data element, both SWCs and both ports, ports linked to the interface. No Python script.",
+      "files": [],
+      "expectations": [
+        "A plan JSON file (*.plan.json) was produced in the outputs directory",
+        "validate_plan reports the plan valid with zero errors",
+        "The plan's request_type is 'system'",
+        "The plan records MCP connectivity status (mcp_connectivity)",
+        "No modelling script was written (the planner writes no code)",
+        "The plan creates a SenderReceiverInterface",
+        "The plan creates both a PPortPrototype and an RPortPrototype",
+        "Both ports are linked to the interface via set_providedInterface / set_requiredInterface"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "plan-ecuc-os",
+      "prompt": "Plan an ECU configuration for the Os BSW module with autosarfactory (plan only, no code): two OsTask containers, Task_5ms with priority 5 and Task_20ms with priority 1, both with schedule FULL, implementation config variant PRE-COMPILE. I do not have an ECUC definition arxml. Output arxml: __OUTDIR__/os_cfg.arxml. This is an unattended run: do not ask me questions - make reasonable choices, record them as assumptions in the plan, and treat the scope and the final plan as approved by me.",
+      "expected_output": "A validated plan JSON (os_cfg.plan.json) with request_type ecuc, two OsTask container values with definition paths, priorities 5 and 1, schedule FULL, mandatory parameters covered.",
+      "files": [],
+      "expectations": [
+        "A plan JSON file (*.plan.json) was produced in the outputs directory",
+        "validate_plan reports the plan valid with zero errors",
+        "The plan's request_type is 'ecuc'",
+        "The plan records MCP connectivity status (mcp_connectivity)",
+        "No modelling script was written (the planner writes no code)",
+        "Every ECUC value step carries a definition path under /AUTOSAR/EcucDefs/",
+        "Two OsTask container values are created",
+        "OsTaskPriority is set for both tasks with the requested values (5 and 1)",
+        "OsTaskSchedule uses the valid literal FULL",
+        "The mandatory OsTaskActivation parameter is set for each task"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "plan-system-modify",
+      "prompt": "There is an existing AUTOSAR model at __OUTDIR__/model.arxml. It contains the sender-receiver interface /Interfaces/SrIf_Speed and the component /Swcs/SpeedReceiver. Plan the modification (plan only, no code) that adds an R-port 'RP_Speed' to SpeedReceiver, requiring SrIf_Speed, modifying the file in place. This is an unattended run: do not ask me questions - make reasonable choices, record them as assumptions in the plan, and treat the scope and the final plan as approved by me.",
+      "expected_output": "A validated plan JSON that reads model.arxml, locates the SWC and interface via get_node, adds the RPortPrototype and links it via set_requiredInterface.",
+      "files": [
+        "files/model.arxml"
+      ],
+      "expectations": [
+        "A plan JSON file (*.plan.json) was produced in the outputs directory",
+        "validate_plan reports the plan valid with zero errors",
+        "The plan's request_type is 'system'",
+        "The plan records MCP connectivity status (mcp_connectivity)",
+        "No modelling script was written (the planner writes no code)",
+        "The plan reads the existing arxml (inputs.read_arxmls is non-empty)",
+        "The plan locates existing elements via get_node steps",
+        "An RPortPrototype is added and linked via set_requiredInterface"
+      ]
+    }
+  ]
+}

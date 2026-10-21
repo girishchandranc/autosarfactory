@@ -43,7 +43,12 @@ def verify_arxml(arxml: str, plan=None) -> dict:
         result["ok"] = False
         result["bad_dest"] = bad
     if plan:
-        plan_obj, _ = load_plan(plan)
+        try:
+            plan_obj, _ = load_plan(plan)
+        except (OSError, ValueError) as e:
+            result["ok"] = False
+            result["error"] = f"could not load plan: {e}"
+            return result
         wanted = {(s.get("args") or {}).get("name") for s in plan_obj["steps"] if s["action"] in ("root", "new")}
         result["missing_from_plan"] = sorted(n for n in wanted if n and n not in names)
         result["ok"] = result["ok"] and not result["missing_from_plan"]

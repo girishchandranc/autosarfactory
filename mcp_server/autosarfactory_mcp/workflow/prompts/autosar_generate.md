@@ -8,6 +8,11 @@ and — only with the user's permission — run it.
 (A path to a plan JSON file, or empty → use the most recent approved plan in this
 conversation. No plan at all → stop and suggest the `autosar-plan` prompt.)
 
+> **No MCP client connected?** Every tool named below can also be called offline from the
+> repo root: `PYTHONPATH=./mcp_server python -m autosarfactory_mcp.cli <tool> '<json kwargs>'`
+> (e.g. `... cli validate_plan '{"plan": "x.plan.json", "fix": true}'`). It prints the same
+> JSON the MCP tool returns.
+
 ---
 
 ## Step 1 — Load and re-validate the plan

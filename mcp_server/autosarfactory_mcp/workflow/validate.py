@@ -404,7 +404,11 @@ def validate_plan(plan, fix: bool = False, out: str | None = None) -> dict:
           plan is written back to it (or to `out`); the corrected plan is always
           returned under "plan" when fixes were applied.
     """
-    plan_obj, src_path = load_plan(plan)
+    try:
+        plan_obj, src_path = load_plan(plan)
+    except (OSError, ValueError) as e:
+        return {"valid": False, "errors": [{"step": "-", "msg": f"could not load plan: {e}"}],
+                "warnings": [], "corrections": [], "applied": False, "stats": {}}
     if fix:
         plan_obj = copy.deepcopy(plan_obj)
     report = Validator(plan_obj, fix).run()

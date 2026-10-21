@@ -11,6 +11,11 @@ with the user. Write **no Python modelling code** — generation is the
 All lookups go through the autosarfactory MCP tools named below. Never guess an
 API name — use only names returned by these tools.
 
+> **No MCP client connected?** Every tool named below can also be called offline from the
+> repo root: `PYTHONPATH=./mcp_server python -m autosarfactory_mcp.cli <tool> '<json kwargs>'`
+> (e.g. `... cli validate_plan '{"plan": "x.plan.json", "fix": true}'`). It prints the same
+> JSON the MCP tool returns.
+
 ---
 
 ## Step 1 — Detect the request type

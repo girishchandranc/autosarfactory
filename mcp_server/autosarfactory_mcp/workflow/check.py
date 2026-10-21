@@ -122,7 +122,10 @@ def _check(src: str, plan: dict | None) -> dict:
 def check_script(script: str, plan=None) -> dict:
     """script: path to a .py file or the script source itself. plan: dict / JSON / path, optional."""
     src = script
-    if "\n" not in script and script.strip().endswith(".py"):
-        src = pathlib.Path(script.strip()).read_text(encoding="utf-8")
-    plan_obj = load_plan(plan)[0] if plan else None
+    try:
+        if "\n" not in script and script.strip().endswith(".py"):
+            src = pathlib.Path(script.strip()).read_text(encoding="utf-8")
+        plan_obj = load_plan(plan)[0] if plan else None
+    except (OSError, ValueError) as e:
+        return {"ok": False, "errors": [f"could not load input: {e}"], "warnings": []}
     return _check(src, plan_obj)
