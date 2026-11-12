@@ -114,6 +114,29 @@ class AutosarModelTestHelper:
         return {tag: [e.find('{*}SHORT-NAME').text for e in impl_xml.findall('{*}' + tag + '/{*}DEPENDENCY-ON-ARTIFACT')]
                 for tag in ('GENERATED-ARTIFACTS', 'REQUIRED-ARTIFACTS', 'REQUIRED-GENERATOR-TOOLS')}
 
+    @staticmethod
+    def children_tags(block):
+        """
+        The tags (as they are in the xml) of the children of the block (an introduction or a list item), in the order
+        in which the model holds them.
+        """
+        tags = {autosarfactory.MultiLanguageParagraph: 'P', autosarfactory.List: 'LIST', autosarfactory.MultiLanguageVerbatim: 'VERBATIM'}
+        return [tags[type(child)] for child in block.get_children()]
+
+    @staticmethod
+    def introduction_tags(file, name, item=None):
+        """
+        Parses the arxml file manually and returns the tags of the children of the introduction of the element with the
+        given short name (or of the item with the given index of its first level lists), in the order of the xml.
+        Comments are left out.
+        """
+        tree = etree.parse(file, etree.XMLParser(remove_blank_text=True))
+        element = next(e for e in tree.iter() if isinstance(e.tag, str) and e.findtext('{*}SHORT-NAME') == name)
+        block = element.find('{*}INTRODUCTION')
+        if item is not None:
+            block = block.findall('{*}LIST/{*}ITEM')[item]
+        return [etree.QName(child).localname for child in block if isinstance(child.tag, str)]
+
 
 def test_model_load_invalid_input():
     """
@@ -1522,4 +1545,175 @@ def test_model_set_short_name_using_factory_method():
     # Read back the file and see if the element is created
     autosarfactory.read([tempComponentArxml])
     assert (autosarfactory.get_node('/Swcs/dRoutine/reqRes') is not None)
+    teardown()
+
+def test_model_introduction_children_are_read_in_the_order_of_the_file():
+    """
+    Tests that the contents of an introduction (aka documentation block) of a container and of parameter definitions, read in the order of the file, and that the getters return them properly.
+    """
+    tempDir = _create_temp_dir()
+    shutil.copy(os.path.join(resourcesDir, 'introduction_order.arxml'), tempDir)
+    autosarfactory.read([os.path.join(tempDir, 'introduction_order.arxml')])
+
+    cont = autosarfactory.get_node('/Defs/Mod/Cont').get_introduction()
+    mixed = autosarfactory.get_node('/Defs/Mod/Cont/ParamMixed').get_introduction()
+    listFirst = autosarfactory.get_node('/Defs/Mod/Cont/ParamListFirst').get_introduction()
+    verbatim = autosarfactory.get_node('/Defs/Mod/Cont/ParamVerbatim').get_introduction()
+
+    assert (AutosarModelTestHelper.children_tags(cont) == ['P', 'LIST', 'P']), 'Cont: paragraph, list, paragraph'
+    assert (AutosarModelTestHelper.children_tags(mixed) == ['P', 'P', 'LIST', 'LIST', 'P', 'P']), 'ParamMixed: two paragraphs, two lists, two paragraphs (the comment is no child)'
+    assert (AutosarModelTestHelper.children_tags(listFirst) == ['LIST', 'P', 'LIST', 'P']), 'ParamListFirst starts with a list'
+    assert (AutosarModelTestHelper.children_tags(verbatim) == ['P', 'VERBATIM', 'P', 'LIST', 'VERBATIM']), 'ParamVerbatim: more than paragraphs and lists'
+
+    # check for the getters
+    assert ([p.get_l1s()[0].get() for p in mixed.get_ps()] == ['P1', 'P2', 'P3', 'P4']), 'get_ps'
+    assert (len(mixed.get_lists()) == 2), 'get_lists'
+    assert (set(mixed.get_children()) == set(mixed.get_ps() + mixed.get_lists())), 'the typed getters hold all the children and nothing else'
+    assert ([v.get_l5s()[0].get() for v in verbatim.get_verbatims()] == ['code', 'more code']), 'get_verbatims'
+
+    assert (autosarfactory.get_node('/Defs/Mod/Cont/ParamEmpty').get_introduction() is None), 'ParamEmpty has no introduction'
+
+    teardown()
+
+def test_model_introduction_keeps_the_order_of_its_children_when_saved():
+    """
+    Tests that changing a part of an introduction does not change the order of its children in the saved file, and that the saved file is read back the same.
+    """
+    tempDir = _create_temp_dir()
+    shutil.copy(os.path.join(resourcesDir, 'introduction_order.arxml'), tempDir)
+    file = os.path.join(tempDir, 'introduction_order.arxml')
+    autosarfactory.read([file])
+
+    cont = autosarfactory.get_node('/Defs/Mod/Cont').get_introduction()
+    mixed = autosarfactory.get_node('/Defs/Mod/Cont/ParamMixed').get_introduction()
+    verbatim = autosarfactory.get_node('/Defs/Mod/Cont/ParamVerbatim').get_introduction()
+
+    # Change the text of paragraphs and of a verbatim text, and the type of a list
+    cont.get_ps()[1].get_l1s()[0].set('After the list, edited')
+    mixed.get_ps()[2].get_l1s()[0].set('P3 edited')
+    mixed.get_lists()[0].set_type(autosarfactory.ListEnum.get('NUMBER'))
+    verbatim.get_verbatims()[0].get_l5s()[0].set('code edited')
+    autosarfactory.save()
+
+    assert (AutosarModelTestHelper.introduction_tags(file, 'Cont') == ['P', 'LIST', 'P']), 'Cont keeps its order'
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamMixed') == ['P', 'P', 'LIST', 'LIST', 'P', 'P']), 'ParamMixed keeps its order'
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamVerbatim') == ['P', 'VERBATIM', 'P', 'LIST', 'VERBATIM']), 'ParamVerbatim keeps its order'
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamListFirst') == ['LIST', 'P', 'LIST', 'P']), 'ParamListFirst was not changed'
+
+    # The introduction of ParamMixed stays between the short name and the elements that follow it, and its comment is kept
+    paramXml = etree.parse(file).find('.//{*}ECUC-INTEGER-PARAM-DEF')
+    paramTags = [etree.QName(child).localname for child in paramXml if isinstance(child.tag, str)]
+    assert (paramTags == ['SHORT-NAME', 'INTRODUCTION', 'LOWER-MULTIPLICITY']), 'order of the elements of ParamMixed'
+    assert (len([c for c in paramXml.find('{*}INTRODUCTION') if not isinstance(c.tag, str)]) == 1), 'the comment must be kept'
+
+    teardown(deleteTempDir=False)
+
+    # Read the saved file again and confirm that the model holds the same
+    autosarfactory.read([file])
+    cont = autosarfactory.get_node('/Defs/Mod/Cont').get_introduction()
+    mixed = autosarfactory.get_node('/Defs/Mod/Cont/ParamMixed').get_introduction()
+    verbatim = autosarfactory.get_node('/Defs/Mod/Cont/ParamVerbatim').get_introduction()
+    assert (AutosarModelTestHelper.children_tags(cont) == ['P', 'LIST', 'P']), 're-read Cont'
+    assert (AutosarModelTestHelper.children_tags(mixed) == ['P', 'P', 'LIST', 'LIST', 'P', 'P']), 're-read ParamMixed'
+    assert (AutosarModelTestHelper.children_tags(verbatim) == ['P', 'VERBATIM', 'P', 'LIST', 'VERBATIM']), 're-read ParamVerbatim'
+    assert (cont.get_ps()[1].get_l1s()[0].get() == 'After the list, edited'), 're-read paragraph text'
+    assert ([p.get_l1s()[0].get() for p in mixed.get_ps()] == ['P1', 'P2', 'P3 edited', 'P4']), 're-read paragraphs of ParamMixed'
+    assert ([l.get_type() for l in mixed.get_lists()] == [autosarfactory.ListEnum.get('NUMBER')] * 2), 're-read list types'
+    assert (verbatim.get_verbatims()[0].get_l5s()[0].get() == 'code edited'), 're-read verbatim text'
+
+    teardown()
+
+def test_model_introduction_children_added_removed_and_moved():
+    """
+    Tests the order of the children of an introduction when children are added , removed, added to another introduction, and when an introduction is created from scratch.
+    """
+    tempDir = _create_temp_dir()
+    shutil.copy(os.path.join(resourcesDir, 'introduction_order.arxml'), tempDir)
+    file = os.path.join(tempDir, 'introduction_order.arxml')
+    autosarfactory.read([file])
+
+    mixed = autosarfactory.get_node('/Defs/Mod/Cont/ParamMixed').get_introduction()
+    listFirst = autosarfactory.get_node('/Defs/Mod/Cont/ParamListFirst').get_introduction()
+
+    # Added children go behind the existing ones, in the order in which they are created
+    mixed.new_List().new_Item().new_P().new_L1().set('x')
+    mixed.new_P().new_L1().set('P5')
+    mixed.new_List().new_Item().new_P().new_L1().set('y')
+    mixed.new_P().new_L1().set('P6')
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamMixed') == ['P', 'P', 'LIST', 'LIST', 'P', 'P', 'LIST', 'P', 'LIST', 'P']), 'new list, paragraph, list, paragraph at the end'
+    assert ([p.get_l1s()[0].get() for p in mixed.get_ps()] == ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']), 'paragraphs in the order of the file'
+
+    # A child removed from the middle: the others keep their order
+    mixed.remove_list(mixed.get_lists()[0])
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamMixed') == ['P', 'P', 'LIST', 'P', 'P', 'LIST', 'P', 'LIST', 'P']), 'the first list is gone'
+
+    # A child which is added again moves to the end, it is not duplicated
+    mixed.add_p(mixed.get_ps()[0])
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamMixed') == ['P', 'LIST', 'P', 'P', 'LIST', 'P', 'LIST', 'P', 'P']), 'P1 moves to the end, and exists once'
+    assert ([p.get_l1s()[0].get() for p in mixed.get_ps()] == ['P2', 'P3', 'P4', 'P5', 'P6', 'P1']), 'P1 is the last paragraph'
+
+    # A child added to another introduction leaves the first one
+    listFirst.add_p(mixed.get_ps()[0])
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamMixed') == ['LIST', 'P', 'P', 'LIST', 'P', 'LIST', 'P', 'P']), 'P2 left ParamMixed'
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamListFirst') == ['LIST', 'P', 'LIST', 'P', 'P']), 'P2 is the last child of ParamListFirst'
+    assert ([p.get_l1s()[0].get() for p in listFirst.get_ps()] == ['Text', 'Tail', 'P2']), 'paragraphs of ParamListFirst'
+
+    # An introduction created from scratch
+    empty = autosarfactory.get_node('/Defs/Mod/Cont/ParamEmpty').new_Introduction()
+    empty.new_P().new_L1().set('a')
+    newList = empty.new_List()
+    newList.new_Item().new_P().new_L1().set('i1')
+    newList.new_Item().new_P().new_L1().set('i2')
+    empty.new_P().new_L1().set('b')
+    empty.new_List().new_Item().new_P().new_L1().set('j')
+    empty.new_P().new_L1().set('c')
+    autosarfactory.save()
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamEmpty') == ['P', 'LIST', 'P', 'LIST', 'P']), 'ParamEmpty: paragraph, list, paragraph, list, paragraph'
+
+    teardown(deleteTempDir=False)
+
+    # Read the saved file again and confirm that the model holds the order of the file
+    autosarfactory.read([file])
+    for name in ('ParamMixed', 'ParamListFirst', 'ParamEmpty'):
+        introduction = autosarfactory.get_node('/Defs/Mod/Cont/' + name).get_introduction()
+        assert (AutosarModelTestHelper.children_tags(introduction) == AutosarModelTestHelper.introduction_tags(file, name)), 're-read ' + name
+
+    teardown()
+
+def test_model_list_item_keeps_the_order_of_its_children():
+    """
+    Tests the same for the children of a list item, which holds its own paragraphs and lists (here P, LIST, P).
+    """
+    tempDir = _create_temp_dir()
+    shutil.copy(os.path.join(resourcesDir, 'introduction_order.arxml'), tempDir)
+    file = os.path.join(tempDir, 'introduction_order.arxml')
+    autosarfactory.read([file])
+
+    first, second = autosarfactory.get_node('/Defs/Mod/Cont/ParamNested').get_introduction().get_lists()[0].get_items()
+    assert (AutosarModelTestHelper.children_tags(first) == ['P', 'LIST', 'P']), 'first item: paragraph, list, paragraph'
+    assert (AutosarModelTestHelper.children_tags(second) == ['P']), 'second item: paragraph'
+
+    # Change the text of a paragraph, and add a list and a paragraph to the second item
+    first.get_ps()[0].get_l1s()[0].set('first edited')
+    second.new_List().new_Item().new_P().new_L1().set('s1')
+    second.new_P().new_L1().set('s2')
+    autosarfactory.save()
+
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamNested', item=0) == ['P', 'LIST', 'P']), 'first item keeps its order'
+    assert (AutosarModelTestHelper.introduction_tags(file, 'ParamNested', item=1) == ['P', 'LIST', 'P']), 'second item: the new list and the new paragraph come after its paragraph'
+
+    teardown(deleteTempDir=False)
+
+    # Read the saved file again and confirm that the model holds the same
+    autosarfactory.read([file])
+    first, second = autosarfactory.get_node('/Defs/Mod/Cont/ParamNested').get_introduction().get_lists()[0].get_items()
+    assert (AutosarModelTestHelper.children_tags(first) == ['P', 'LIST', 'P']), 're-read first item'
+    assert (AutosarModelTestHelper.children_tags(second) == ['P', 'LIST', 'P']), 're-read second item'
+    assert ([p.get_l1s()[0].get() for p in first.get_ps()] == ['first edited', 'after sub']), 're-read paragraphs of the first item'
+    assert ([p.get_l1s()[0].get() for p in second.get_ps()] == ['second', 's2']), 're-read paragraphs of the second item'
+
     teardown()

@@ -735,6 +735,56 @@ class AutosarNode:
                     AutosarNode._insert_element_after_given_tags(self._node, value._node, create_after_nodes = [item_tag] + create_after_nodes)
                 idx += 1
 
+    def _build_ordered_children(self, collection, tag_map, file, ref_counter):
+        """
+        Builds, in the order of the xml, every child whose tag is in tag_map into `collection` (the children of
+        an xsd:choice that can occur in any order, e.g. the content of a DocumentationBlock); returns the updated
+        placeholder counter.
+        :param collection: The dict to which the objects needs to be added
+        :param tag_map: dict of the xml tag name to a tuple of the name of the python class and the role name.
+        """
+        for xml_child in self._node.iterchildren():
+            if not isinstance(xml_child.tag, str):
+                continue # comments and processing instructions
+            entry = tag_map.get(etree.QName(xml_child).localname)
+            if entry is None:
+                continue
+            has_name = xml_child.find('{*}SHORT-NAME') is not None
+            placeholder = None if has_name else '[{}_@{}]'.format(entry[1], ref_counter)
+            if not has_name:
+                ref_counter += 1
+            collection[self._build_child_node(xml_child, __str_to_class__(entry[0]), file, placeholder)] = None
+        return ref_counter
+
+    def _save_ordered_children(self, collection, item_tags, create_after_nodes):
+        """
+        Saves the children of an xsd:choice that can occur in any order (see _build_ordered_children).
+        The members are placed one after the other in the order of the collection, behind the elements 
+        that precede them in the xml sequence.
+        :param collection: the child nodes to be saved under the node.
+        :param item_tags: tuple of (python class, xml tag): the tag to set on the members of that class. None when
+                          the own tag of the class is already correct (has concrete subtypes).
+        :param create_after_nodes: The list nodes after which the first member needs to be inserted.
+        """
+        members = [member for member in collection if member.file == self.file]
+        if len(members) == 0:
+            return
+        for member in members:
+            if XDT.is_dirty(member):
+                item_tag = next((tag for clazz, tag in item_tags if isinstance(member, clazz)), None)
+                if item_tag is not None:
+                    member._node.tag = item_tag
+                member._save_contents()
+        # The members go behind the last xml child of the first of these tags that exists.
+        anchor = 0
+        for tag in create_after_nodes:
+            preceding_children = list(self._node.iterchildren('{*}' + tag))
+            if len(preceding_children) > 0:
+                anchor = self._node.index(preceding_children[-1]) + 1
+                break
+        for index, member in enumerate(members):
+            self._node.insert(anchor + index, member._node)
+
     def _build_inline_child(self, child_type, file):
         """
         Child that shares this node's own xml element(EMF attribute
@@ -2967,22 +3017,20 @@ class HwPinGroupContent(ARObject):
         super().__init__()
         self.tag = 'HW-PIN-GROUP-CONTENT'
         self._node = etree.Element('HW-PIN-GROUP-CONTENT')
-        self.__hwPins = {}
-        self.__hwPinGroups = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__hwPins, '{*}HW-PIN', HwPin, file, 'hwPins', refCounter)
-        refCounter = self._build_child_collection(self.__hwPinGroups, '{*}HW-PIN-GROUP', HwPinGroup, file, 'hwPinGroups', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'HW-PIN': ('HwPin', 'hwPins'), 'HW-PIN-GROUP': ('HwPinGroup', 'hwPinGroups')}, file, refCounter)
         return self
 
     def get_hwPins(self) -> list[HwPin]:
-        return list(self.__hwPins.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, HwPin)]
 
     def __bind_hwPin(self, value: HwPin) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__hwPins.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, HwPin) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of HwPin or its sub-classes'.format(value))
@@ -2996,14 +3044,6 @@ class HwPinGroupContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'HwPin_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_hwPin_at_index(self, index: int, value: HwPin) -> None:
-        """
-        Adds a single value to the hwPins at the given index
-        """
-        if value is not None:
-            self.__bind_hwPin(value)
-            AutosarNode._insert_at_index(self.__hwPins, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_hwPin(self, value: HwPin) -> None:
         """
@@ -3011,7 +3051,7 @@ class HwPinGroupContent(ARObject):
         """
         if value is not None:
             self.__bind_hwPin(value)
-            self.__hwPins[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_hwPins(self, values: list[HwPin]) -> None:
@@ -3041,10 +3081,10 @@ class HwPinGroupContent(ARObject):
             self.remove_hwPin(value)
 
     def get_hwPinGroups(self) -> list[HwPinGroup]:
-        return list(self.__hwPinGroups.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, HwPinGroup)]
 
     def __bind_hwPinGroup(self, value: HwPinGroup) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__hwPinGroups.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, HwPinGroup) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of HwPinGroup or its sub-classes'.format(value))
@@ -3058,14 +3098,6 @@ class HwPinGroupContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'HwPinGroup_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_hwPinGroup_at_index(self, index: int, value: HwPinGroup) -> None:
-        """
-        Adds a single value to the hwPinGroups at the given index
-        """
-        if value is not None:
-            self.__bind_hwPinGroup(value)
-            AutosarNode._insert_at_index(self.__hwPinGroups, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_hwPinGroup(self, value: HwPinGroup) -> None:
         """
@@ -3073,7 +3105,7 @@ class HwPinGroupContent(ARObject):
         """
         if value is not None:
             self.__bind_hwPinGroup(value)
-            self.__hwPinGroups[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_hwPinGroups(self, values: list[HwPinGroup]) -> None:
@@ -3136,34 +3168,27 @@ class HwPinGroupContent(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__hwPins)
-        children.extend(self.__hwPinGroups)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__hwPins:
-            return 'hwPins'
-        if child in self.__hwPinGroups:
-            return 'hwPinGroups'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'hwPins':
-            self.__hwPins[child] = None
-        elif containment_slot == 'hwPinGroups':
-            self.__hwPinGroups[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'hwPins':
-            self.__hwPins.pop(child, None)
-        elif containment_slot == 'hwPinGroups':
-            self.__hwPinGroups.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -3180,8 +3205,7 @@ class HwPinGroupContent(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'HW-PIN', self.__hwPins, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'HW-PIN-GROUP', self.__hwPinGroups, self._insert_after_tags + ['HW-PIN', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((HwPin, 'HW-PIN'), (HwPinGroup, 'HW-PIN-GROUP'), ), self._insert_after_tags + ['T', 'S'])
 
 class HwElementRefConditional(ARObject):
     """
@@ -12860,40 +12884,20 @@ class DocumentationBlock(ARObject):
         super().__init__()
         self.tag = 'DOCUMENTATION-BLOCK'
         self._node = etree.Element('DOCUMENTATION-BLOCK')
-        self.__msrQueryP2s = {}
-        self.__ps = {}
-        self.__verbatims = {}
-        self.__lists = {}
-        self.__defLists = {}
-        self.__labeledLists = {}
-        self.__formulas = {}
-        self.__figures = {}
-        self.__notes = {}
-        self.__traces = {}
-        self.__structuredReqs = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'P': ('MultiLanguageParagraph', 'ps'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims'), 'LIST': ('List', 'lists'), 'DEF-LIST': ('DefList', 'defLists'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'FORMULA': ('MlFormula', 'formulas'), 'FIGURE': ('MlFigure', 'figures'), 'NOTE': ('Note', 'notes'), 'TRACE': ('TraceableText', 'traces'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs')}, file, refCounter)
         return self
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -12907,14 +12911,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -12922,7 +12918,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -12952,10 +12948,10 @@ class DocumentationBlock(ARObject):
             self.remove_msrQueryP2(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -12969,14 +12965,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -12984,7 +12972,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -13014,10 +13002,10 @@ class DocumentationBlock(ARObject):
             self.remove_p(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -13031,14 +13019,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -13046,7 +13026,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -13076,10 +13056,10 @@ class DocumentationBlock(ARObject):
             self.remove_verbatim(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -13093,14 +13073,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -13108,7 +13080,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -13138,10 +13110,10 @@ class DocumentationBlock(ARObject):
             self.remove_list(value)
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -13155,14 +13127,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -13170,7 +13134,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -13200,10 +13164,10 @@ class DocumentationBlock(ARObject):
             self.remove_defList(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -13217,14 +13181,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -13232,7 +13188,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -13262,10 +13218,10 @@ class DocumentationBlock(ARObject):
             self.remove_labeledList(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -13279,14 +13235,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -13294,7 +13242,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -13324,10 +13272,10 @@ class DocumentationBlock(ARObject):
             self.remove_formula(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -13341,14 +13289,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -13356,7 +13296,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -13386,10 +13326,10 @@ class DocumentationBlock(ARObject):
             self.remove_figure(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -13403,14 +13343,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -13418,7 +13350,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -13448,10 +13380,10 @@ class DocumentationBlock(ARObject):
             self.remove_note(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -13465,14 +13397,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -13480,7 +13404,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -13510,10 +13434,10 @@ class DocumentationBlock(ARObject):
             self.remove_trace(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -13527,14 +13451,6 @@ class DocumentationBlock(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -13542,7 +13458,7 @@ class DocumentationBlock(ARObject):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -13749,97 +13665,27 @@ class DocumentationBlock(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__ps)
-        children.extend(self.__verbatims)
-        children.extend(self.__lists)
-        children.extend(self.__defLists)
-        children.extend(self.__labeledLists)
-        children.extend(self.__formulas)
-        children.extend(self.__figures)
-        children.extend(self.__notes)
-        children.extend(self.__traces)
-        children.extend(self.__structuredReqs)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__verbatims:
-            return 'verbatims'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -13856,17 +13702,7 @@ class DocumentationBlock(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['DEF-LIST', 'LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['LABELED-LIST', 'DEF-LIST', 'LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['FORMULA', 'LABELED-LIST', 'DEF-LIST', 'LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['FIGURE', 'FORMULA', 'LABELED-LIST', 'DEF-LIST', 'LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['NOTE', 'FIGURE', 'FORMULA', 'LABELED-LIST', 'DEF-LIST', 'LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['TRACE', 'NOTE', 'FIGURE', 'FORMULA', 'LABELED-LIST', 'DEF-LIST', 'LIST', 'VERBATIM', 'P', 'MSR-QUERY-P-2', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((MsrQueryP2, 'MSR-QUERY-P-2'), (MultiLanguageParagraph, 'P'), (MultiLanguageVerbatim, 'VERBATIM'), (List, 'LIST'), (DefList, 'DEF-LIST'), (LabeledList, 'LABELED-LIST'), (MlFormula, 'FORMULA'), (MlFigure, 'FIGURE'), (Note, 'NOTE'), (TraceableText, 'TRACE'), (StructuredReq, 'STRUCTURED-REQ'), ), self._insert_after_tags + ['T', 'S'])
 
 class Caption(MultilanguageReferrable):
     """
@@ -15502,17 +15338,7 @@ class Entry(ARObject):
         self.__rowsep = None
         self.__spanname = None
         self.__valign = None
-        self.__defLists = {}
-        self.__figures = {}
-        self.__formulas = {}
-        self.__labeledLists = {}
-        self.__lists = {}
-        self.__msrQueryP2s = {}
-        self.__notes = {}
-        self.__ps = {}
-        self.__structuredReqs = {}
-        self.__traces = {}
-        self.__verbatims = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
@@ -15530,17 +15356,7 @@ class Entry(ARObject):
         self.__valign = self._read_xml_attribute('VALIGN', ValignEnum.get)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'DEF-LIST': ('DefList', 'defLists'), 'FIGURE': ('MlFigure', 'figures'), 'FORMULA': ('MlFormula', 'formulas'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'LIST': ('List', 'lists'), 'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'NOTE': ('Note', 'notes'), 'P': ('MultiLanguageParagraph', 'ps'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs'), 'TRACE': ('TraceableText', 'traces'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims')}, file, refCounter)
         return self
 
     def get_bgcolorRemoved(self) -> str:
@@ -15628,10 +15444,10 @@ class Entry(ARObject):
         XDT.mark_attribute_dirty('valign', self)
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -15645,14 +15461,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -15660,7 +15468,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -15690,10 +15498,10 @@ class Entry(ARObject):
             self.remove_defList(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -15707,14 +15515,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -15722,7 +15522,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -15752,10 +15552,10 @@ class Entry(ARObject):
             self.remove_figure(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -15769,14 +15569,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -15784,7 +15576,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -15814,10 +15606,10 @@ class Entry(ARObject):
             self.remove_formula(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -15831,14 +15623,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -15846,7 +15630,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -15876,10 +15660,10 @@ class Entry(ARObject):
             self.remove_labeledList(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -15893,14 +15677,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -15908,7 +15684,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -15938,10 +15714,10 @@ class Entry(ARObject):
             self.remove_list(value)
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -15955,14 +15731,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -15970,7 +15738,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -16000,10 +15768,10 @@ class Entry(ARObject):
             self.remove_msrQueryP2(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -16017,14 +15785,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -16032,7 +15792,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -16062,10 +15822,10 @@ class Entry(ARObject):
             self.remove_note(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -16079,14 +15839,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -16094,7 +15846,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -16124,10 +15876,10 @@ class Entry(ARObject):
             self.remove_p(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -16141,14 +15893,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -16156,7 +15900,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -16186,10 +15930,10 @@ class Entry(ARObject):
             self.remove_structuredReq(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -16203,14 +15947,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -16218,7 +15954,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -16248,10 +15984,10 @@ class Entry(ARObject):
             self.remove_trace(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -16265,14 +16001,6 @@ class Entry(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -16280,7 +16008,7 @@ class Entry(ARObject):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -16487,97 +16215,27 @@ class Entry(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__defLists)
-        children.extend(self.__figures)
-        children.extend(self.__formulas)
-        children.extend(self.__labeledLists)
-        children.extend(self.__lists)
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__notes)
-        children.extend(self.__ps)
-        children.extend(self.__structuredReqs)
-        children.extend(self.__traces)
-        children.extend(self.__verbatims)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__verbatims:
-            return 'verbatims'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -16611,17 +16269,7 @@ class Entry(ARObject):
         self._save_xml_attribute('BGCOLOR', 'bgcolor', str(self.__bgcolor) if self.__bgcolor is not None else None)
         self._save_xml_attribute('COLNAME', 'colname', str(self.__colname) if self.__colname is not None else None)
         self._save_xml_attribute('COLSEP', 'colsep', str(self.__colsep) if self.__colsep is not None else None)
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'BGCOLOR', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((DefList, 'DEF-LIST'), (MlFigure, 'FIGURE'), (MlFormula, 'FORMULA'), (LabeledList, 'LABELED-LIST'), (List, 'LIST'), (MsrQueryP2, 'MSR-QUERY-P-2'), (Note, 'NOTE'), (MultiLanguageParagraph, 'P'), (StructuredReq, 'STRUCTURED-REQ'), (TraceableText, 'TRACE'), (MultiLanguageVerbatim, 'VERBATIM'), ), self._insert_after_tags + ['BGCOLOR', 'T', 'S'])
         self._save_xml_attribute('MOREROWS', 'morerows', str(self.__morerows) if self.__morerows is not None else None)
         self._save_xml_attribute('NAMEEND', 'nameend', str(self.__nameend) if self.__nameend is not None else None)
         self._save_xml_attribute('NAMEST', 'namest', str(self.__namest) if self.__namest is not None else None)
@@ -17991,42 +17639,22 @@ class Item(Paginateable):
         super().__init__()
         self.tag = 'ITEM'
         self._node = etree.Element('ITEM')
-        self.__defLists = {}
-        self.__figures = {}
-        self.__formulas = {}
-        self.__labeledLists = {}
-        self.__lists = {}
-        self.__msrQueryP2s = {}
-        self.__notes = {}
-        self.__ps = {}
-        self.__structuredReqs = {}
-        self.__traces = {}
-        self.__verbatims = {}
+        self.__orderedMixedChildren = {}
         self.__variationPoint = None
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'DEF-LIST': ('DefList', 'defLists'), 'FIGURE': ('MlFigure', 'figures'), 'FORMULA': ('MlFormula', 'formulas'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'LIST': ('List', 'lists'), 'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'NOTE': ('Note', 'notes'), 'P': ('MultiLanguageParagraph', 'ps'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs'), 'TRACE': ('TraceableText', 'traces'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims')}, file, refCounter)
         return self
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -18040,14 +17668,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -18055,7 +17675,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -18085,10 +17705,10 @@ class Item(Paginateable):
             self.remove_defList(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -18102,14 +17722,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -18117,7 +17729,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -18147,10 +17759,10 @@ class Item(Paginateable):
             self.remove_figure(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -18164,14 +17776,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -18179,7 +17783,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -18209,10 +17813,10 @@ class Item(Paginateable):
             self.remove_formula(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -18226,14 +17830,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -18241,7 +17837,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -18271,10 +17867,10 @@ class Item(Paginateable):
             self.remove_labeledList(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -18288,14 +17884,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -18303,7 +17891,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -18333,10 +17921,10 @@ class Item(Paginateable):
             self.remove_list(value)
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -18350,14 +17938,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -18365,7 +17945,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -18395,10 +17975,10 @@ class Item(Paginateable):
             self.remove_msrQueryP2(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -18412,14 +17992,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -18427,7 +17999,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -18457,10 +18029,10 @@ class Item(Paginateable):
             self.remove_note(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -18474,14 +18046,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -18489,7 +18053,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -18519,10 +18083,10 @@ class Item(Paginateable):
             self.remove_p(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -18536,14 +18100,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -18551,7 +18107,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -18581,10 +18137,10 @@ class Item(Paginateable):
             self.remove_structuredReq(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -18598,14 +18154,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -18613,7 +18161,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -18643,10 +18191,10 @@ class Item(Paginateable):
             self.remove_trace(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -18660,14 +18208,6 @@ class Item(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -18675,7 +18215,7 @@ class Item(Paginateable):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -18923,44 +18463,14 @@ class Item(Paginateable):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__defLists)
-        children.extend(self.__figures)
-        children.extend(self.__formulas)
-        children.extend(self.__labeledLists)
-        children.extend(self.__lists)
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__notes)
-        children.extend(self.__ps)
-        children.extend(self.__structuredReqs)
-        children.extend(self.__traces)
-        children.extend(self.__verbatims)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__verbatims:
-            return 'verbatims'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__variationPoint is child:
             return 'variationPoint'
         return super()._containment_slot_of(child)
@@ -18968,28 +18478,8 @@ class Item(Paginateable):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is None:
                 self.__variationPoint = child
@@ -18999,28 +18489,8 @@ class Item(Paginateable):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is child:
                 self.__variationPoint = None
@@ -19042,17 +18512,7 @@ class Item(Paginateable):
         if XDT.is_dirty(self) is False:
             return
         super()._save_Paginateable()
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((DefList, 'DEF-LIST'), (MlFigure, 'FIGURE'), (MlFormula, 'FORMULA'), (LabeledList, 'LABELED-LIST'), (List, 'LIST'), (MsrQueryP2, 'MSR-QUERY-P-2'), (Note, 'NOTE'), (MultiLanguageParagraph, 'P'), (StructuredReq, 'STRUCTURED-REQ'), (TraceableText, 'TRACE'), (MultiLanguageVerbatim, 'VERBATIM'), ), self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['VERBATIM', 'TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
 
 class LabeledItem(Paginateable):
@@ -19064,18 +18524,8 @@ class LabeledItem(Paginateable):
         self.tag = 'LABELED-ITEM'
         self._node = etree.Element('LABELED-ITEM')
         self.__helpEntry = None
+        self.__orderedMixedChildren = {}
         self.__itemLabel = None
-        self.__defLists = {}
-        self.__figures = {}
-        self.__formulas = {}
-        self.__labeledLists = {}
-        self.__lists = {}
-        self.__msrQueryP2s = {}
-        self.__notes = {}
-        self.__ps = {}
-        self.__structuredReqs = {}
-        self.__traces = {}
-        self.__verbatims = {}
         self.__variationPoint = None
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
@@ -19084,18 +18534,8 @@ class LabeledItem(Paginateable):
 
         refCounter = 0
         self.__itemLabel = self._build_single_child('{*}ITEM-LABEL', MultiLanguageOverviewParagraph, file, 'itemLabel')
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'DEF-LIST': ('DefList', 'defLists'), 'FIGURE': ('MlFigure', 'figures'), 'FORMULA': ('MlFormula', 'formulas'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'LIST': ('List', 'lists'), 'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'NOTE': ('Note', 'notes'), 'P': ('MultiLanguageParagraph', 'ps'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs'), 'TRACE': ('TraceableText', 'traces'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims')}, file, refCounter)
         return self
 
     def get_helpEntry(self) -> str:
@@ -19131,10 +18571,10 @@ class LabeledItem(Paginateable):
         XDT.mark_dirty(self.__itemLabel, self)
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -19148,14 +18588,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -19163,7 +18595,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -19193,10 +18625,10 @@ class LabeledItem(Paginateable):
             self.remove_defList(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -19210,14 +18642,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -19225,7 +18649,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -19255,10 +18679,10 @@ class LabeledItem(Paginateable):
             self.remove_figure(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -19272,14 +18696,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -19287,7 +18703,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -19317,10 +18733,10 @@ class LabeledItem(Paginateable):
             self.remove_formula(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -19334,14 +18750,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -19349,7 +18757,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -19379,10 +18787,10 @@ class LabeledItem(Paginateable):
             self.remove_labeledList(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -19396,14 +18804,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -19411,7 +18811,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -19441,10 +18841,10 @@ class LabeledItem(Paginateable):
             self.remove_list(value)
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -19458,14 +18858,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -19473,7 +18865,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -19503,10 +18895,10 @@ class LabeledItem(Paginateable):
             self.remove_msrQueryP2(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -19520,14 +18912,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -19535,7 +18919,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -19565,10 +18949,10 @@ class LabeledItem(Paginateable):
             self.remove_note(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -19582,14 +18966,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -19597,7 +18973,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -19627,10 +19003,10 @@ class LabeledItem(Paginateable):
             self.remove_p(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -19644,14 +19020,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -19659,7 +19027,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -19689,10 +19057,10 @@ class LabeledItem(Paginateable):
             self.remove_structuredReq(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -19706,14 +19074,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -19721,7 +19081,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -19751,10 +19111,10 @@ class LabeledItem(Paginateable):
             self.remove_trace(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -19768,14 +19128,6 @@ class LabeledItem(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -19783,7 +19135,7 @@ class LabeledItem(Paginateable):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -20049,46 +19401,16 @@ class LabeledItem(Paginateable):
         children = super().get_children()
         if self.__itemLabel is not None:
             children.append(self.__itemLabel)
-        children.extend(self.__defLists)
-        children.extend(self.__figures)
-        children.extend(self.__formulas)
-        children.extend(self.__labeledLists)
-        children.extend(self.__lists)
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__notes)
-        children.extend(self.__ps)
-        children.extend(self.__structuredReqs)
-        children.extend(self.__traces)
-        children.extend(self.__verbatims)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__itemLabel is child:
             return 'itemLabel'
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__verbatims:
-            return 'verbatims'
         if self.__variationPoint is child:
             return 'variationPoint'
         return super()._containment_slot_of(child)
@@ -20096,31 +19418,11 @@ class LabeledItem(Paginateable):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'itemLabel':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
+        elif containment_slot == 'itemLabel':
             if self.__itemLabel is None:
                 self.__itemLabel = child
-        elif containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is None:
                 self.__variationPoint = child
@@ -20130,31 +19432,11 @@ class LabeledItem(Paginateable):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'itemLabel':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
+        elif containment_slot == 'itemLabel':
             if self.__itemLabel is child:
                 self.__itemLabel = None
-        elif containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is child:
                 self.__variationPoint = None
@@ -20179,17 +19461,7 @@ class LabeledItem(Paginateable):
         super()._save_Paginateable()
         self._save_xml_attribute('HELP-ENTRY', 'helpEntry', str(self.__helpEntry) if self.__helpEntry is not None else None)
         self._save_single_child('ITEM-LABEL', self.__itemLabel, self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((DefList, 'DEF-LIST'), (MlFigure, 'FIGURE'), (MlFormula, 'FORMULA'), (LabeledList, 'LABELED-LIST'), (List, 'LIST'), (MsrQueryP2, 'MSR-QUERY-P-2'), (Note, 'NOTE'), (MultiLanguageParagraph, 'P'), (StructuredReq, 'STRUCTURED-REQ'), (TraceableText, 'TRACE'), (MultiLanguageVerbatim, 'VERBATIM'), ), self._insert_after_tags + ['ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['VERBATIM', 'TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'ITEM-LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
 
 class LabeledList(Paginateable):
@@ -21622,42 +20894,22 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         super().__init__()
         self.tag = 'TRACEABLE-TEXT'
         self._node = etree.Element('TRACEABLE-TEXT')
-        self.__defLists = {}
-        self.__figures = {}
-        self.__formulas = {}
-        self.__labeledLists = {}
-        self.__lists = {}
-        self.__msrQueryP2s = {}
-        self.__notes = {}
-        self.__ps = {}
-        self.__structuredReqs = {}
-        self.__traces = {}
-        self.__verbatims = {}
+        self.__orderedMixedChildren = {}
         self.__variationPoint = None
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'DEF-LIST': ('DefList', 'defLists'), 'FIGURE': ('MlFigure', 'figures'), 'FORMULA': ('MlFormula', 'formulas'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'LIST': ('List', 'lists'), 'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'NOTE': ('Note', 'notes'), 'P': ('MultiLanguageParagraph', 'ps'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs'), 'TRACE': ('TraceableText', 'traces'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims')}, file, refCounter)
         return self
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -21671,14 +20923,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -21686,7 +20930,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -21716,10 +20960,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_defList(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -21733,14 +20977,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -21748,7 +20984,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -21778,10 +21014,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_figure(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -21795,14 +21031,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -21810,7 +21038,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -21840,10 +21068,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_formula(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -21857,14 +21085,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -21872,7 +21092,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -21902,10 +21122,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_labeledList(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -21919,14 +21139,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -21934,7 +21146,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -21964,10 +21176,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_list(value)
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -21981,14 +21193,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -21996,7 +21200,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -22026,10 +21230,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_msrQueryP2(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -22043,14 +21247,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -22058,7 +21254,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -22088,10 +21284,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_note(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -22105,14 +21301,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -22120,7 +21308,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -22150,10 +21338,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_p(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -22167,14 +21355,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -22182,7 +21362,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -22212,10 +21392,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_structuredReq(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -22229,14 +21409,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -22244,7 +21416,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -22274,10 +21446,10 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             self.remove_trace(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -22291,14 +21463,6 @@ class TraceableText(Identifiable,Paginateable,Traceable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -22306,7 +21470,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -22554,44 +21718,14 @@ class TraceableText(Identifiable,Paginateable,Traceable):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__defLists)
-        children.extend(self.__figures)
-        children.extend(self.__formulas)
-        children.extend(self.__labeledLists)
-        children.extend(self.__lists)
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__notes)
-        children.extend(self.__ps)
-        children.extend(self.__structuredReqs)
-        children.extend(self.__traces)
-        children.extend(self.__verbatims)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__verbatims:
-            return 'verbatims'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__variationPoint is child:
             return 'variationPoint'
         return super()._containment_slot_of(child)
@@ -22599,28 +21733,8 @@ class TraceableText(Identifiable,Paginateable,Traceable):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is None:
                 self.__variationPoint = child
@@ -22630,28 +21744,8 @@ class TraceableText(Identifiable,Paginateable,Traceable):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is child:
                 self.__variationPoint = None
@@ -22675,17 +21769,7 @@ class TraceableText(Identifiable,Paginateable,Traceable):
         super()._save_Identifiable()
         super()._save_Paginateable()
         super()._save_Traceable()
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((DefList, 'DEF-LIST'), (MlFigure, 'FIGURE'), (MlFormula, 'FORMULA'), (LabeledList, 'LABELED-LIST'), (List, 'LIST'), (MsrQueryP2, 'MSR-QUERY-P-2'), (Note, 'NOTE'), (MultiLanguageParagraph, 'P'), (StructuredReq, 'STRUCTURED-REQ'), (TraceableText, 'TRACE'), (MultiLanguageVerbatim, 'VERBATIM'), ), self._insert_after_tags + ['TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['VERBATIM', 'TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'TRACE-REFS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
 
 class MlFormula(Paginateable):
@@ -24017,18 +23101,8 @@ class Note(Paginateable):
         self.tag = 'NOTE'
         self._node = etree.Element('NOTE')
         self.__noteType = None
+        self.__orderedMixedChildren = {}
         self.__label = None
-        self.__defLists = {}
-        self.__figures = {}
-        self.__formulas = {}
-        self.__labeledLists = {}
-        self.__lists = {}
-        self.__msrQueryP2s = {}
-        self.__notes = {}
-        self.__ps = {}
-        self.__structuredReqs = {}
-        self.__traces = {}
-        self.__verbatims = {}
         self.__variationPoint = None
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
@@ -24037,18 +23111,8 @@ class Note(Paginateable):
 
         refCounter = 0
         self.__label = self._build_single_child('{*}LABEL', MultilanguageLongName, file, 'label')
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'DEF-LIST': ('DefList', 'defLists'), 'FIGURE': ('MlFigure', 'figures'), 'FORMULA': ('MlFormula', 'formulas'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'LIST': ('List', 'lists'), 'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'NOTE': ('Note', 'notes'), 'P': ('MultiLanguageParagraph', 'ps'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs'), 'TRACE': ('TraceableText', 'traces'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims')}, file, refCounter)
         return self
 
     def get_noteType(self) -> NoteTypeEnum:
@@ -24084,10 +23148,10 @@ class Note(Paginateable):
         XDT.mark_dirty(self.__label, self)
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -24101,14 +23165,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -24116,7 +23172,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -24146,10 +23202,10 @@ class Note(Paginateable):
             self.remove_defList(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -24163,14 +23219,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -24178,7 +23226,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -24208,10 +23256,10 @@ class Note(Paginateable):
             self.remove_figure(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -24225,14 +23273,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -24240,7 +23280,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -24270,10 +23310,10 @@ class Note(Paginateable):
             self.remove_formula(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -24287,14 +23327,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -24302,7 +23334,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -24332,10 +23364,10 @@ class Note(Paginateable):
             self.remove_labeledList(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -24349,14 +23381,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -24364,7 +23388,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -24394,10 +23418,10 @@ class Note(Paginateable):
             self.remove_list(value)
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -24411,14 +23435,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -24426,7 +23442,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -24456,10 +23472,10 @@ class Note(Paginateable):
             self.remove_msrQueryP2(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -24473,14 +23489,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -24488,7 +23496,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -24518,10 +23526,10 @@ class Note(Paginateable):
             self.remove_note(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -24535,14 +23543,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -24550,7 +23550,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -24580,10 +23580,10 @@ class Note(Paginateable):
             self.remove_p(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -24597,14 +23597,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -24612,7 +23604,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -24642,10 +23634,10 @@ class Note(Paginateable):
             self.remove_structuredReq(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -24659,14 +23651,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -24674,7 +23658,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -24704,10 +23688,10 @@ class Note(Paginateable):
             self.remove_trace(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -24721,14 +23705,6 @@ class Note(Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -24736,7 +23712,7 @@ class Note(Paginateable):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -25002,46 +23978,16 @@ class Note(Paginateable):
         children = super().get_children()
         if self.__label is not None:
             children.append(self.__label)
-        children.extend(self.__defLists)
-        children.extend(self.__figures)
-        children.extend(self.__formulas)
-        children.extend(self.__labeledLists)
-        children.extend(self.__lists)
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__notes)
-        children.extend(self.__ps)
-        children.extend(self.__structuredReqs)
-        children.extend(self.__traces)
-        children.extend(self.__verbatims)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__label is child:
             return 'label'
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__verbatims:
-            return 'verbatims'
         if self.__variationPoint is child:
             return 'variationPoint'
         return super()._containment_slot_of(child)
@@ -25049,31 +23995,11 @@ class Note(Paginateable):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'label':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
+        elif containment_slot == 'label':
             if self.__label is None:
                 self.__label = child
-        elif containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is None:
                 self.__variationPoint = child
@@ -25083,31 +24009,11 @@ class Note(Paginateable):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'label':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
+        elif containment_slot == 'label':
             if self.__label is child:
                 self.__label = None
-        elif containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is child:
                 self.__variationPoint = None
@@ -25132,17 +24038,7 @@ class Note(Paginateable):
         super()._save_Paginateable()
         self._save_xml_attribute('NOTE-TYPE', 'noteType', self.__noteType.literal if self.__noteType is not None else None)
         self._save_single_child('LABEL', self.__label, self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((DefList, 'DEF-LIST'), (MlFigure, 'FIGURE'), (MlFormula, 'FORMULA'), (LabeledList, 'LABELED-LIST'), (List, 'LIST'), (MsrQueryP2, 'MSR-QUERY-P-2'), (Note, 'NOTE'), (MultiLanguageParagraph, 'P'), (StructuredReq, 'STRUCTURED-REQ'), (TraceableText, 'TRACE'), (MultiLanguageVerbatim, 'VERBATIM'), ), self._insert_after_tags + ['LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['VERBATIM', 'TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'LABEL', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'T', 'S'])
 
 class GeneralAnnotation(ARObject):
@@ -25335,15 +24231,15 @@ class ChapterContent(ARObject):
         super().__init__()
         self.tag = 'CHAPTER-CONTENT'
         self._node = etree.Element('CHAPTER-CONTENT')
+        self.__orderedMixedChildren = {}
         self.__topicContents = {}
-        self.__prms = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
         refCounter = self._build_child_collection(self.__topicContents, '{*}TOPIC-CONTENT', TopicContentOrMsrQuery, file, 'topicContents', refCounter)
-        refCounter = self._build_child_collection(self.__prms, '{*}PRMS', Prms, file, 'prms', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'PRMS': ('Prms', 'prms')}, file, refCounter)
         return self
 
     def get_topicContents(self) -> list[TopicContentOrMsrQuery]:
@@ -25409,10 +24305,10 @@ class ChapterContent(ARObject):
             self.remove_topicContent(value)
 
     def get_prms(self) -> list[Prms]:
-        return list(self.__prms.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Prms)]
 
     def __bind_prm(self, value: Prms) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__prms.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Prms) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Prms or its sub-classes'.format(value))
@@ -25426,14 +24322,6 @@ class ChapterContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Prms_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_prm_at_index(self, index: int, value: Prms) -> None:
-        """
-        Adds a single value to the prms at the given index
-        """
-        if value is not None:
-            self.__bind_prm(value)
-            AutosarNode._insert_at_index(self.__prms, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_prm(self, value: Prms) -> None:
         """
@@ -25441,7 +24329,7 @@ class ChapterContent(ARObject):
         """
         if value is not None:
             self.__bind_prm(value)
-            self.__prms[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_prms(self, values: list[Prms]) -> None:
@@ -25506,33 +24394,33 @@ class ChapterContent(ARObject):
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
         children.extend(self.__topicContents)
-        children.extend(self.__prms)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if child in self.__topicContents:
             return 'topicContents'
-        if child in self.__prms:
-            return 'prms'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'topicContents':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
+        elif containment_slot == 'topicContents':
             self.__topicContents[child] = None
-        elif containment_slot == 'prms':
-            self.__prms[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'topicContents':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
+        elif containment_slot == 'topicContents':
             self.__topicContents.pop(child, None)
-        elif containment_slot == 'prms':
-            self.__prms.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -25553,7 +24441,7 @@ class ChapterContent(ARObject):
         super()._save_ARObject()
         for value in self.__topicContents:
             self._save_inline_child(value, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'PRMS', self.__prms, self._insert_after_tags + ['TOPIC-CONTENT', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Prms, 'PRMS'), ), self._insert_after_tags + ['TOPIC-CONTENT', 'T', 'S'])
 
 class TopicContentOrMsrQuery(ARObject):
     """
@@ -25563,22 +24451,22 @@ class TopicContentOrMsrQuery(ARObject):
         super().__init__()
         self.tag = 'TOPIC-CONTENT-OR-MSR-QUERY'
         self._node = etree.Element('TOPIC-CONTENT-OR-MSR-QUERY')
-        self.__msrQueryP1s = {}
+        self.__orderedMixedChildren = {}
         self.__topicContents = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__msrQueryP1s, '{*}MSR-QUERY-P-1', MsrQueryP1, file, 'msrQueryP1s', refCounter)
         refCounter = self._build_child_collection(self.__topicContents, '{*}TOPIC-CONTENT', TopicContent, file, 'topicContents', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'MSR-QUERY-P-1': ('MsrQueryP1', 'msrQueryP1s')}, file, refCounter)
         return self
 
     def get_msrQueryP1s(self) -> list[MsrQueryP1]:
-        return list(self.__msrQueryP1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP1)]
 
     def __bind_msrQueryP1(self, value: MsrQueryP1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP1 or its sub-classes'.format(value))
@@ -25592,14 +24480,6 @@ class TopicContentOrMsrQuery(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryP1_at_index(self, index: int, value: MsrQueryP1) -> None:
-        """
-        Adds a single value to the msrQueryP1s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP1(value)
-            AutosarNode._insert_at_index(self.__msrQueryP1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP1(self, value: MsrQueryP1) -> None:
         """
@@ -25607,7 +24487,7 @@ class TopicContentOrMsrQuery(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryP1(value)
-            self.__msrQueryP1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP1s(self, values: list[MsrQueryP1]) -> None:
@@ -25733,13 +24613,13 @@ class TopicContentOrMsrQuery(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__msrQueryP1s)
         children.extend(self.__topicContents)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__msrQueryP1s:
-            return 'msrQueryP1s'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if child in self.__topicContents:
             return 'topicContents'
         return super()._containment_slot_of(child)
@@ -25747,8 +24627,8 @@ class TopicContentOrMsrQuery(ARObject):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'msrQueryP1s':
-            self.__msrQueryP1s[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'topicContents':
             self.__topicContents[child] = None
         else:
@@ -25757,8 +24637,8 @@ class TopicContentOrMsrQuery(ARObject):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'msrQueryP1s':
-            self.__msrQueryP1s.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'topicContents':
             self.__topicContents.pop(child, None)
         else:
@@ -25779,7 +24659,7 @@ class TopicContentOrMsrQuery(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'MSR-QUERY-P-1', self.__msrQueryP1s, self._insert_after_tags + ['T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((MsrQueryP1, 'MSR-QUERY-P-1'), ), self._insert_after_tags + ['T', 'S'])
         for value in self.__topicContents:
             self._save_inline_child(value, self._insert_after_tags + ['MSR-QUERY-P-1', 'T', 'S'])
 
@@ -25792,7 +24672,7 @@ class Topic1(Identifiable,Paginateable):
         self.tag = 'TOPIC-1'
         self._node = etree.Element('TOPIC-1')
         self.__helpEntry = None
-        self.__msrQueryP1s = {}
+        self.__orderedMixedChildren = {}
         self.__topicContents = {}
         self.__variationPoint = None
 
@@ -25801,9 +24681,9 @@ class Topic1(Identifiable,Paginateable):
         self.__helpEntry = self._read_xml_attribute('HELP-ENTRY', datatype_utils.get_string_value)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__msrQueryP1s, '{*}MSR-QUERY-P-1', MsrQueryP1, file, 'msrQueryP1s', refCounter)
         refCounter = self._build_child_collection(self.__topicContents, '{*}TOPIC-CONTENT', TopicContent, file, 'topicContents', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'MSR-QUERY-P-1': ('MsrQueryP1', 'msrQueryP1s')}, file, refCounter)
         return self
 
     def get_helpEntry(self) -> str:
@@ -25814,10 +24694,10 @@ class Topic1(Identifiable,Paginateable):
         XDT.mark_attribute_dirty('helpEntry', self)
 
     def get_msrQueryP1s(self) -> list[MsrQueryP1]:
-        return list(self.__msrQueryP1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP1)]
 
     def __bind_msrQueryP1(self, value: MsrQueryP1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP1 or its sub-classes'.format(value))
@@ -25831,14 +24711,6 @@ class Topic1(Identifiable,Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryP1_at_index(self, index: int, value: MsrQueryP1) -> None:
-        """
-        Adds a single value to the msrQueryP1s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP1(value)
-            AutosarNode._insert_at_index(self.__msrQueryP1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP1(self, value: MsrQueryP1) -> None:
         """
@@ -25846,7 +24718,7 @@ class Topic1(Identifiable,Paginateable):
         """
         if value is not None:
             self.__bind_msrQueryP1(value)
-            self.__msrQueryP1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP1s(self, values: list[MsrQueryP1]) -> None:
@@ -26013,15 +24885,15 @@ class Topic1(Identifiable,Paginateable):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__msrQueryP1s)
         children.extend(self.__topicContents)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__msrQueryP1s:
-            return 'msrQueryP1s'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if child in self.__topicContents:
             return 'topicContents'
         if self.__variationPoint is child:
@@ -26031,8 +24903,8 @@ class Topic1(Identifiable,Paginateable):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'msrQueryP1s':
-            self.__msrQueryP1s[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'topicContents':
             self.__topicContents[child] = None
         elif containment_slot == 'variationPoint':
@@ -26044,8 +24916,8 @@ class Topic1(Identifiable,Paginateable):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'msrQueryP1s':
-            self.__msrQueryP1s.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'topicContents':
             self.__topicContents.pop(child, None)
         elif containment_slot == 'variationPoint':
@@ -26074,7 +24946,7 @@ class Topic1(Identifiable,Paginateable):
         super()._save_Identifiable()
         super()._save_Paginateable()
         self._save_xml_attribute('HELP-ENTRY', 'helpEntry', str(self.__helpEntry) if self.__helpEntry is not None else None)
-        self._save_child_collection(None, 'MSR-QUERY-P-1', self.__msrQueryP1s, self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((MsrQueryP1, 'MSR-QUERY-P-1'), ), self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
         for value in self.__topicContents:
             self._save_inline_child(value, self._insert_after_tags + ['MSR-QUERY-P-1', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['TOPIC-CONTENT', 'MSR-QUERY-P-1', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
@@ -26087,44 +24959,20 @@ class TopicContent(ARObject):
         super().__init__()
         self.tag = 'TOPIC-CONTENT'
         self._node = etree.Element('TOPIC-CONTENT')
-        self.__defLists = {}
-        self.__figures = {}
-        self.__formulas = {}
-        self.__labeledLists = {}
-        self.__lists = {}
-        self.__msrQueryP2s = {}
-        self.__notes = {}
-        self.__ps = {}
-        self.__structuredReqs = {}
-        self.__traces = {}
-        self.__verbatims = {}
-        self.__tables = {}
-        self.__traceableTables = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__defLists, '{*}DEF-LIST', DefList, file, 'defLists', refCounter)
-        refCounter = self._build_child_collection(self.__figures, '{*}FIGURE', MlFigure, file, 'figures', refCounter)
-        refCounter = self._build_child_collection(self.__formulas, '{*}FORMULA', MlFormula, file, 'formulas', refCounter)
-        refCounter = self._build_child_collection(self.__labeledLists, '{*}LABELED-LIST', LabeledList, file, 'labeledLists', refCounter)
-        refCounter = self._build_child_collection(self.__lists, '{*}LIST', List, file, 'lists', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryP2s, '{*}MSR-QUERY-P-2', MsrQueryP2, file, 'msrQueryP2s', refCounter)
-        refCounter = self._build_child_collection(self.__notes, '{*}NOTE', Note, file, 'notes', refCounter)
-        refCounter = self._build_child_collection(self.__ps, '{*}P', MultiLanguageParagraph, file, 'ps', refCounter)
-        refCounter = self._build_child_collection(self.__structuredReqs, '{*}STRUCTURED-REQ', StructuredReq, file, 'structuredReqs', refCounter)
-        refCounter = self._build_child_collection(self.__traces, '{*}TRACE', TraceableText, file, 'traces', refCounter)
-        refCounter = self._build_child_collection(self.__verbatims, '{*}VERBATIM', MultiLanguageVerbatim, file, 'verbatims', refCounter)
-        refCounter = self._build_child_collection(self.__tables, '{*}TABLE', Table, file, 'tables', refCounter)
-        refCounter = self._build_child_collection(self.__traceableTables, '{*}TRACEABLE-TABLE', TraceableTable, file, 'traceableTables', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'DEF-LIST': ('DefList', 'defLists'), 'FIGURE': ('MlFigure', 'figures'), 'FORMULA': ('MlFormula', 'formulas'), 'LABELED-LIST': ('LabeledList', 'labeledLists'), 'LIST': ('List', 'lists'), 'MSR-QUERY-P-2': ('MsrQueryP2', 'msrQueryP2s'), 'NOTE': ('Note', 'notes'), 'P': ('MultiLanguageParagraph', 'ps'), 'STRUCTURED-REQ': ('StructuredReq', 'structuredReqs'), 'TRACE': ('TraceableText', 'traces'), 'VERBATIM': ('MultiLanguageVerbatim', 'verbatims'), 'TABLE': ('Table', 'tables'), 'TRACEABLE-TABLE': ('TraceableTable', 'traceableTables')}, file, refCounter)
         return self
 
     def get_defLists(self) -> list[DefList]:
-        return list(self.__defLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, DefList)]
 
     def __bind_defList(self, value: DefList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__defLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, DefList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of DefList or its sub-classes'.format(value))
@@ -26138,14 +24986,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'DefList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_defList_at_index(self, index: int, value: DefList) -> None:
-        """
-        Adds a single value to the defLists at the given index
-        """
-        if value is not None:
-            self.__bind_defList(value)
-            AutosarNode._insert_at_index(self.__defLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_defList(self, value: DefList) -> None:
         """
@@ -26153,7 +24993,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_defList(value)
-            self.__defLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_defLists(self, values: list[DefList]) -> None:
@@ -26183,10 +25023,10 @@ class TopicContent(ARObject):
             self.remove_defList(value)
 
     def get_figures(self) -> list[MlFigure]:
-        return list(self.__figures.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFigure)]
 
     def __bind_figure(self, value: MlFigure) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__figures.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFigure) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFigure or its sub-classes'.format(value))
@@ -26200,14 +25040,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MlFigure_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_figure_at_index(self, index: int, value: MlFigure) -> None:
-        """
-        Adds a single value to the figures at the given index
-        """
-        if value is not None:
-            self.__bind_figure(value)
-            AutosarNode._insert_at_index(self.__figures, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_figure(self, value: MlFigure) -> None:
         """
@@ -26215,7 +25047,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_figure(value)
-            self.__figures[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_figures(self, values: list[MlFigure]) -> None:
@@ -26245,10 +25077,10 @@ class TopicContent(ARObject):
             self.remove_figure(value)
 
     def get_formulas(self) -> list[MlFormula]:
-        return list(self.__formulas.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MlFormula)]
 
     def __bind_formula(self, value: MlFormula) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__formulas.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MlFormula) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MlFormula or its sub-classes'.format(value))
@@ -26262,14 +25094,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MlFormula_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_formula_at_index(self, index: int, value: MlFormula) -> None:
-        """
-        Adds a single value to the formulas at the given index
-        """
-        if value is not None:
-            self.__bind_formula(value)
-            AutosarNode._insert_at_index(self.__formulas, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_formula(self, value: MlFormula) -> None:
         """
@@ -26277,7 +25101,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_formula(value)
-            self.__formulas[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_formulas(self, values: list[MlFormula]) -> None:
@@ -26307,10 +25131,10 @@ class TopicContent(ARObject):
             self.remove_formula(value)
 
     def get_labeledLists(self) -> list[LabeledList]:
-        return list(self.__labeledLists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, LabeledList)]
 
     def __bind_labeledList(self, value: LabeledList) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__labeledLists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, LabeledList) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of LabeledList or its sub-classes'.format(value))
@@ -26324,14 +25148,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'LabeledList_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_labeledList_at_index(self, index: int, value: LabeledList) -> None:
-        """
-        Adds a single value to the labeledLists at the given index
-        """
-        if value is not None:
-            self.__bind_labeledList(value)
-            AutosarNode._insert_at_index(self.__labeledLists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_labeledList(self, value: LabeledList) -> None:
         """
@@ -26339,7 +25155,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_labeledList(value)
-            self.__labeledLists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_labeledLists(self, values: list[LabeledList]) -> None:
@@ -26369,10 +25185,10 @@ class TopicContent(ARObject):
             self.remove_labeledList(value)
 
     def get_lists(self) -> list[List]:
-        return list(self.__lists.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, List)]
 
     def __bind_list(self, value: List) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__lists.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, List) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of List or its sub-classes'.format(value))
@@ -26386,14 +25202,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'List_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_list_at_index(self, index: int, value: List) -> None:
-        """
-        Adds a single value to the lists at the given index
-        """
-        if value is not None:
-            self.__bind_list(value)
-            AutosarNode._insert_at_index(self.__lists, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_list(self, value: List) -> None:
         """
@@ -26401,7 +25209,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_list(value)
-            self.__lists[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_lists(self, values: list[List]) -> None:
@@ -26431,10 +25239,10 @@ class TopicContent(ARObject):
             self.remove_list(value)
 
     def get_msrQueryP2s(self) -> list[MsrQueryP2]:
-        return list(self.__msrQueryP2s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryP2)]
 
     def __bind_msrQueryP2(self, value: MsrQueryP2) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryP2s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryP2) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryP2 or its sub-classes'.format(value))
@@ -26448,14 +25256,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryP2_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_msrQueryP2_at_index(self, index: int, value: MsrQueryP2) -> None:
-        """
-        Adds a single value to the msrQueryP2s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryP2(value)
-            AutosarNode._insert_at_index(self.__msrQueryP2s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryP2(self, value: MsrQueryP2) -> None:
         """
@@ -26463,7 +25263,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryP2(value)
-            self.__msrQueryP2s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryP2s(self, values: list[MsrQueryP2]) -> None:
@@ -26493,10 +25293,10 @@ class TopicContent(ARObject):
             self.remove_msrQueryP2(value)
 
     def get_notes(self) -> list[Note]:
-        return list(self.__notes.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Note)]
 
     def __bind_note(self, value: Note) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__notes.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Note) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Note or its sub-classes'.format(value))
@@ -26510,14 +25310,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Note_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_note_at_index(self, index: int, value: Note) -> None:
-        """
-        Adds a single value to the notes at the given index
-        """
-        if value is not None:
-            self.__bind_note(value)
-            AutosarNode._insert_at_index(self.__notes, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_note(self, value: Note) -> None:
         """
@@ -26525,7 +25317,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_note(value)
-            self.__notes[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_notes(self, values: list[Note]) -> None:
@@ -26555,10 +25347,10 @@ class TopicContent(ARObject):
             self.remove_note(value)
 
     def get_ps(self) -> list[MultiLanguageParagraph]:
-        return list(self.__ps.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageParagraph)]
 
     def __bind_p(self, value: MultiLanguageParagraph) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__ps.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageParagraph) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageParagraph or its sub-classes'.format(value))
@@ -26572,14 +25364,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageParagraph_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_p_at_index(self, index: int, value: MultiLanguageParagraph) -> None:
-        """
-        Adds a single value to the ps at the given index
-        """
-        if value is not None:
-            self.__bind_p(value)
-            AutosarNode._insert_at_index(self.__ps, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_p(self, value: MultiLanguageParagraph) -> None:
         """
@@ -26587,7 +25371,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_p(value)
-            self.__ps[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_ps(self, values: list[MultiLanguageParagraph]) -> None:
@@ -26617,10 +25401,10 @@ class TopicContent(ARObject):
             self.remove_p(value)
 
     def get_structuredReqs(self) -> list[StructuredReq]:
-        return list(self.__structuredReqs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, StructuredReq)]
 
     def __bind_structuredReq(self, value: StructuredReq) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__structuredReqs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, StructuredReq) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of StructuredReq or its sub-classes'.format(value))
@@ -26634,14 +25418,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'StructuredReq_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_structuredReq_at_index(self, index: int, value: StructuredReq) -> None:
-        """
-        Adds a single value to the structuredReqs at the given index
-        """
-        if value is not None:
-            self.__bind_structuredReq(value)
-            AutosarNode._insert_at_index(self.__structuredReqs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_structuredReq(self, value: StructuredReq) -> None:
         """
@@ -26649,7 +25425,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_structuredReq(value)
-            self.__structuredReqs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_structuredReqs(self, values: list[StructuredReq]) -> None:
@@ -26679,10 +25455,10 @@ class TopicContent(ARObject):
             self.remove_structuredReq(value)
 
     def get_traces(self) -> list[TraceableText]:
-        return list(self.__traces.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableText)]
 
     def __bind_trace(self, value: TraceableText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traces.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableText or its sub-classes'.format(value))
@@ -26696,14 +25472,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'TraceableText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_trace_at_index(self, index: int, value: TraceableText) -> None:
-        """
-        Adds a single value to the traces at the given index
-        """
-        if value is not None:
-            self.__bind_trace(value)
-            AutosarNode._insert_at_index(self.__traces, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_trace(self, value: TraceableText) -> None:
         """
@@ -26711,7 +25479,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_trace(value)
-            self.__traces[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traces(self, values: list[TraceableText]) -> None:
@@ -26741,10 +25509,10 @@ class TopicContent(ARObject):
             self.remove_trace(value)
 
     def get_verbatims(self) -> list[MultiLanguageVerbatim]:
-        return list(self.__verbatims.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MultiLanguageVerbatim)]
 
     def __bind_verbatim(self, value: MultiLanguageVerbatim) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__verbatims.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MultiLanguageVerbatim) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MultiLanguageVerbatim or its sub-classes'.format(value))
@@ -26758,14 +25526,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MultiLanguageVerbatim_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_verbatim_at_index(self, index: int, value: MultiLanguageVerbatim) -> None:
-        """
-        Adds a single value to the verbatims at the given index
-        """
-        if value is not None:
-            self.__bind_verbatim(value)
-            AutosarNode._insert_at_index(self.__verbatims, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_verbatim(self, value: MultiLanguageVerbatim) -> None:
         """
@@ -26773,7 +25533,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_verbatim(value)
-            self.__verbatims[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_verbatims(self, values: list[MultiLanguageVerbatim]) -> None:
@@ -26803,10 +25563,10 @@ class TopicContent(ARObject):
             self.remove_verbatim(value)
 
     def get_tables(self) -> list[Table]:
-        return list(self.__tables.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Table)]
 
     def __bind_table(self, value: Table) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__tables.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Table) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Table or its sub-classes'.format(value))
@@ -26820,14 +25580,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Table_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_table_at_index(self, index: int, value: Table) -> None:
-        """
-        Adds a single value to the tables at the given index
-        """
-        if value is not None:
-            self.__bind_table(value)
-            AutosarNode._insert_at_index(self.__tables, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_table(self, value: Table) -> None:
         """
@@ -26835,7 +25587,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_table(value)
-            self.__tables[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_tables(self, values: list[Table]) -> None:
@@ -26865,10 +25617,10 @@ class TopicContent(ARObject):
             self.remove_table(value)
 
     def get_traceableTables(self) -> list[TraceableTable]:
-        return list(self.__traceableTables.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, TraceableTable)]
 
     def __bind_traceableTable(self, value: TraceableTable) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__traceableTables.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, TraceableTable) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of TraceableTable or its sub-classes'.format(value))
@@ -26882,14 +25634,6 @@ class TopicContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'TraceableTable_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_traceableTable_at_index(self, index: int, value: TraceableTable) -> None:
-        """
-        Adds a single value to the traceableTables at the given index
-        """
-        if value is not None:
-            self.__bind_traceableTable(value)
-            AutosarNode._insert_at_index(self.__traceableTables, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_traceableTable(self, value: TraceableTable) -> None:
         """
@@ -26897,7 +25641,7 @@ class TopicContent(ARObject):
         """
         if value is not None:
             self.__bind_traceableTable(value)
-            self.__traceableTables[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_traceableTables(self, values: list[TraceableTable]) -> None:
@@ -27136,111 +25880,27 @@ class TopicContent(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__defLists)
-        children.extend(self.__figures)
-        children.extend(self.__formulas)
-        children.extend(self.__labeledLists)
-        children.extend(self.__lists)
-        children.extend(self.__msrQueryP2s)
-        children.extend(self.__notes)
-        children.extend(self.__ps)
-        children.extend(self.__structuredReqs)
-        children.extend(self.__traces)
-        children.extend(self.__verbatims)
-        children.extend(self.__tables)
-        children.extend(self.__traceableTables)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__defLists:
-            return 'defLists'
-        if child in self.__figures:
-            return 'figures'
-        if child in self.__formulas:
-            return 'formulas'
-        if child in self.__labeledLists:
-            return 'labeledLists'
-        if child in self.__lists:
-            return 'lists'
-        if child in self.__msrQueryP2s:
-            return 'msrQueryP2s'
-        if child in self.__notes:
-            return 'notes'
-        if child in self.__ps:
-            return 'ps'
-        if child in self.__structuredReqs:
-            return 'structuredReqs'
-        if child in self.__traces:
-            return 'traces'
-        if child in self.__verbatims:
-            return 'verbatims'
-        if child in self.__tables:
-            return 'tables'
-        if child in self.__traceableTables:
-            return 'traceableTables'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists[child] = None
-        elif containment_slot == 'figures':
-            self.__figures[child] = None
-        elif containment_slot == 'formulas':
-            self.__formulas[child] = None
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists[child] = None
-        elif containment_slot == 'lists':
-            self.__lists[child] = None
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s[child] = None
-        elif containment_slot == 'notes':
-            self.__notes[child] = None
-        elif containment_slot == 'ps':
-            self.__ps[child] = None
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs[child] = None
-        elif containment_slot == 'traces':
-            self.__traces[child] = None
-        elif containment_slot == 'verbatims':
-            self.__verbatims[child] = None
-        elif containment_slot == 'tables':
-            self.__tables[child] = None
-        elif containment_slot == 'traceableTables':
-            self.__traceableTables[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'defLists':
-            self.__defLists.pop(child, None)
-        elif containment_slot == 'figures':
-            self.__figures.pop(child, None)
-        elif containment_slot == 'formulas':
-            self.__formulas.pop(child, None)
-        elif containment_slot == 'labeledLists':
-            self.__labeledLists.pop(child, None)
-        elif containment_slot == 'lists':
-            self.__lists.pop(child, None)
-        elif containment_slot == 'msrQueryP2s':
-            self.__msrQueryP2s.pop(child, None)
-        elif containment_slot == 'notes':
-            self.__notes.pop(child, None)
-        elif containment_slot == 'ps':
-            self.__ps.pop(child, None)
-        elif containment_slot == 'structuredReqs':
-            self.__structuredReqs.pop(child, None)
-        elif containment_slot == 'traces':
-            self.__traces.pop(child, None)
-        elif containment_slot == 'verbatims':
-            self.__verbatims.pop(child, None)
-        elif containment_slot == 'tables':
-            self.__tables.pop(child, None)
-        elif containment_slot == 'traceableTables':
-            self.__traceableTables.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -27257,19 +25917,7 @@ class TopicContent(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'DEF-LIST', self.__defLists, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'FIGURE', self.__figures, self._insert_after_tags + ['DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'FORMULA', self.__formulas, self._insert_after_tags + ['FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'LABELED-LIST', self.__labeledLists, self._insert_after_tags + ['FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'LIST', self.__lists, self._insert_after_tags + ['LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-P-2', self.__msrQueryP2s, self._insert_after_tags + ['LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'NOTE', self.__notes, self._insert_after_tags + ['MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'P', self.__ps, self._insert_after_tags + ['NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'STRUCTURED-REQ', self.__structuredReqs, self._insert_after_tags + ['P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'TRACE', self.__traces, self._insert_after_tags + ['STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'VERBATIM', self.__verbatims, self._insert_after_tags + ['TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'TABLE', self.__tables, self._insert_after_tags + ['VERBATIM', 'TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
-        self._save_child_collection(None, 'TRACEABLE-TABLE', self.__traceableTables, self._insert_after_tags + ['TABLE', 'VERBATIM', 'TRACE', 'STRUCTURED-REQ', 'P', 'NOTE', 'MSR-QUERY-P-2', 'LIST', 'LABELED-LIST', 'FORMULA', 'FIGURE', 'DEF-LIST', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((DefList, 'DEF-LIST'), (MlFigure, 'FIGURE'), (MlFormula, 'FORMULA'), (LabeledList, 'LABELED-LIST'), (List, 'LIST'), (MsrQueryP2, 'MSR-QUERY-P-2'), (Note, 'NOTE'), (MultiLanguageParagraph, 'P'), (StructuredReq, 'STRUCTURED-REQ'), (TraceableText, 'TRACE'), (MultiLanguageVerbatim, 'VERBATIM'), (Table, 'TABLE'), (TraceableTable, 'TRACEABLE-TABLE'), ), self._insert_after_tags + ['T', 'S'])
 
 class ChapterModel(ARObject):
     """
@@ -27279,30 +25927,22 @@ class ChapterModel(ARObject):
         super().__init__()
         self.tag = 'CHAPTER-MODEL'
         self._node = etree.Element('CHAPTER-MODEL')
-        self.__prms = {}
+        self.__orderedMixedChildren = {}
         self.__topicContents = {}
-        self.__msrQueryTopic1s = {}
-        self.__topic1s = {}
-        self.__chapters = {}
-        self.__msrQueryChapters = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__prms, '{*}PRMS', Prms, file, 'prms', refCounter)
         refCounter = self._build_child_collection(self.__topicContents, '{*}TOPIC-CONTENT', TopicContentOrMsrQuery, file, 'topicContents', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryTopic1s, '{*}MSR-QUERY-TOPIC-1', MsrQueryTopic1, file, 'msrQueryTopic1s', refCounter)
-        refCounter = self._build_child_collection(self.__topic1s, '{*}TOPIC-1', Topic1, file, 'topic1s', refCounter)
-        refCounter = self._build_child_collection(self.__chapters, '{*}CHAPTER', Chapter, file, 'chapters', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryChapters, '{*}MSR-QUERY-CHAPTER', MsrQueryChapter, file, 'msrQueryChapters', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'PRMS': ('Prms', 'prms'), 'MSR-QUERY-TOPIC-1': ('MsrQueryTopic1', 'msrQueryTopic1s'), 'TOPIC-1': ('Topic1', 'topic1s'), 'CHAPTER': ('Chapter', 'chapters'), 'MSR-QUERY-CHAPTER': ('MsrQueryChapter', 'msrQueryChapters')}, file, refCounter)
         return self
 
     def get_prms(self) -> list[Prms]:
-        return list(self.__prms.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Prms)]
 
     def __bind_prm(self, value: Prms) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__prms.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Prms) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Prms or its sub-classes'.format(value))
@@ -27316,14 +25956,6 @@ class ChapterModel(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Prms_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_prm_at_index(self, index: int, value: Prms) -> None:
-        """
-        Adds a single value to the prms at the given index
-        """
-        if value is not None:
-            self.__bind_prm(value)
-            AutosarNode._insert_at_index(self.__prms, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_prm(self, value: Prms) -> None:
         """
@@ -27331,7 +25963,7 @@ class ChapterModel(ARObject):
         """
         if value is not None:
             self.__bind_prm(value)
-            self.__prms[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_prms(self, values: list[Prms]) -> None:
@@ -27423,10 +26055,10 @@ class ChapterModel(ARObject):
             self.remove_topicContent(value)
 
     def get_msrQueryTopic1s(self) -> list[MsrQueryTopic1]:
-        return list(self.__msrQueryTopic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryTopic1)]
 
     def __bind_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryTopic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryTopic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryTopic1 or its sub-classes'.format(value))
@@ -27440,14 +26072,6 @@ class ChapterModel(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryTopic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryTopic1_at_index(self, index: int, value: MsrQueryTopic1) -> None:
-        """
-        Adds a single value to the msrQueryTopic1s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryTopic1(value)
-            AutosarNode._insert_at_index(self.__msrQueryTopic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
         """
@@ -27455,7 +26079,7 @@ class ChapterModel(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryTopic1(value)
-            self.__msrQueryTopic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryTopic1s(self, values: list[MsrQueryTopic1]) -> None:
@@ -27485,10 +26109,10 @@ class ChapterModel(ARObject):
             self.remove_msrQueryTopic1(value)
 
     def get_topic1s(self) -> list[Topic1]:
-        return list(self.__topic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Topic1)]
 
     def __bind_topic1(self, value: Topic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__topic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Topic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Topic1 or its sub-classes'.format(value))
@@ -27502,14 +26126,6 @@ class ChapterModel(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Topic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_topic1_at_index(self, index: int, value: Topic1) -> None:
-        """
-        Adds a single value to the topic1s at the given index
-        """
-        if value is not None:
-            self.__bind_topic1(value)
-            AutosarNode._insert_at_index(self.__topic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_topic1(self, value: Topic1) -> None:
         """
@@ -27517,7 +26133,7 @@ class ChapterModel(ARObject):
         """
         if value is not None:
             self.__bind_topic1(value)
-            self.__topic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_topic1s(self, values: list[Topic1]) -> None:
@@ -27547,10 +26163,10 @@ class ChapterModel(ARObject):
             self.remove_topic1(value)
 
     def get_chapters(self) -> list[Chapter]:
-        return list(self.__chapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Chapter)]
 
     def __bind_chapter(self, value: Chapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__chapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Chapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Chapter or its sub-classes'.format(value))
@@ -27564,14 +26180,6 @@ class ChapterModel(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Chapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_chapter_at_index(self, index: int, value: Chapter) -> None:
-        """
-        Adds a single value to the chapters at the given index
-        """
-        if value is not None:
-            self.__bind_chapter(value)
-            AutosarNode._insert_at_index(self.__chapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_chapter(self, value: Chapter) -> None:
         """
@@ -27579,7 +26187,7 @@ class ChapterModel(ARObject):
         """
         if value is not None:
             self.__bind_chapter(value)
-            self.__chapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_chapters(self, values: list[Chapter]) -> None:
@@ -27609,10 +26217,10 @@ class ChapterModel(ARObject):
             self.remove_chapter(value)
 
     def get_msrQueryChapters(self) -> list[MsrQueryChapter]:
-        return list(self.__msrQueryChapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryChapter)]
 
     def __bind_msrQueryChapter(self, value: MsrQueryChapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryChapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryChapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryChapter or its sub-classes'.format(value))
@@ -27626,14 +26234,6 @@ class ChapterModel(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryChapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryChapter_at_index(self, index: int, value: MsrQueryChapter) -> None:
-        """
-        Adds a single value to the msrQueryChapters at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryChapter(value)
-            AutosarNode._insert_at_index(self.__msrQueryChapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryChapter(self, value: MsrQueryChapter) -> None:
         """
@@ -27641,7 +26241,7 @@ class ChapterModel(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryChapter(value)
-            self.__msrQueryChapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryChapters(self, values: list[MsrQueryChapter]) -> None:
@@ -27769,62 +26369,34 @@ class ChapterModel(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__prms)
         children.extend(self.__topicContents)
-        children.extend(self.__msrQueryTopic1s)
-        children.extend(self.__topic1s)
-        children.extend(self.__chapters)
-        children.extend(self.__msrQueryChapters)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__prms:
-            return 'prms'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if child in self.__topicContents:
             return 'topicContents'
-        if child in self.__msrQueryTopic1s:
-            return 'msrQueryTopic1s'
-        if child in self.__topic1s:
-            return 'topic1s'
-        if child in self.__chapters:
-            return 'chapters'
-        if child in self.__msrQueryChapters:
-            return 'msrQueryChapters'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'prms':
-            self.__prms[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'topicContents':
             self.__topicContents[child] = None
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s[child] = None
-        elif containment_slot == 'topic1s':
-            self.__topic1s[child] = None
-        elif containment_slot == 'chapters':
-            self.__chapters[child] = None
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'prms':
-            self.__prms.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'topicContents':
             self.__topicContents.pop(child, None)
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s.pop(child, None)
-        elif containment_slot == 'topic1s':
-            self.__topic1s.pop(child, None)
-        elif containment_slot == 'chapters':
-            self.__chapters.pop(child, None)
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -27843,13 +26415,9 @@ class ChapterModel(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'PRMS', self.__prms, self._insert_after_tags + ['T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Prms, 'PRMS'), (MsrQueryTopic1, 'MSR-QUERY-TOPIC-1'), (Topic1, 'TOPIC-1'), (Chapter, 'CHAPTER'), (MsrQueryChapter, 'MSR-QUERY-CHAPTER'), ), self._insert_after_tags + ['T', 'S'])
         for value in self.__topicContents:
             self._save_inline_child(value, self._insert_after_tags + ['PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-TOPIC-1', self.__msrQueryTopic1s, self._insert_after_tags + ['TOPIC-CONTENT', 'PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'TOPIC-1', self.__topic1s, self._insert_after_tags + ['MSR-QUERY-TOPIC-1', 'TOPIC-CONTENT', 'PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'CHAPTER', self.__chapters, self._insert_after_tags + ['TOPIC-1', 'MSR-QUERY-TOPIC-1', 'TOPIC-CONTENT', 'PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-CHAPTER', self.__msrQueryChapters, self._insert_after_tags + ['CHAPTER', 'TOPIC-1', 'MSR-QUERY-TOPIC-1', 'TOPIC-CONTENT', 'PRMS', 'T', 'S'])
 
 class TopicOrMsrQuery(ARObject):
     """
@@ -27859,22 +26427,20 @@ class TopicOrMsrQuery(ARObject):
         super().__init__()
         self.tag = 'TOPIC-OR-MSR-QUERY'
         self._node = etree.Element('TOPIC-OR-MSR-QUERY')
-        self.__topic1s = {}
-        self.__msrQueryTopic1s = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__topic1s, '{*}TOPIC-1', Topic1, file, 'topic1s', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryTopic1s, '{*}MSR-QUERY-TOPIC-1', MsrQueryTopic1, file, 'msrQueryTopic1s', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'TOPIC-1': ('Topic1', 'topic1s'), 'MSR-QUERY-TOPIC-1': ('MsrQueryTopic1', 'msrQueryTopic1s')}, file, refCounter)
         return self
 
     def get_topic1s(self) -> list[Topic1]:
-        return list(self.__topic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Topic1)]
 
     def __bind_topic1(self, value: Topic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__topic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Topic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Topic1 or its sub-classes'.format(value))
@@ -27888,14 +26454,6 @@ class TopicOrMsrQuery(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Topic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_topic1_at_index(self, index: int, value: Topic1) -> None:
-        """
-        Adds a single value to the topic1s at the given index
-        """
-        if value is not None:
-            self.__bind_topic1(value)
-            AutosarNode._insert_at_index(self.__topic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_topic1(self, value: Topic1) -> None:
         """
@@ -27903,7 +26461,7 @@ class TopicOrMsrQuery(ARObject):
         """
         if value is not None:
             self.__bind_topic1(value)
-            self.__topic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_topic1s(self, values: list[Topic1]) -> None:
@@ -27933,10 +26491,10 @@ class TopicOrMsrQuery(ARObject):
             self.remove_topic1(value)
 
     def get_msrQueryTopic1s(self) -> list[MsrQueryTopic1]:
-        return list(self.__msrQueryTopic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryTopic1)]
 
     def __bind_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryTopic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryTopic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryTopic1 or its sub-classes'.format(value))
@@ -27950,14 +26508,6 @@ class TopicOrMsrQuery(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryTopic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryTopic1_at_index(self, index: int, value: MsrQueryTopic1) -> None:
-        """
-        Adds a single value to the msrQueryTopic1s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryTopic1(value)
-            AutosarNode._insert_at_index(self.__msrQueryTopic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
         """
@@ -27965,7 +26515,7 @@ class TopicOrMsrQuery(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryTopic1(value)
-            self.__msrQueryTopic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryTopic1s(self, values: list[MsrQueryTopic1]) -> None:
@@ -28028,34 +26578,27 @@ class TopicOrMsrQuery(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__topic1s)
-        children.extend(self.__msrQueryTopic1s)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__topic1s:
-            return 'topic1s'
-        if child in self.__msrQueryTopic1s:
-            return 'msrQueryTopic1s'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'topic1s':
-            self.__topic1s[child] = None
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'topic1s':
-            self.__topic1s.pop(child, None)
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -28072,8 +26615,7 @@ class TopicOrMsrQuery(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'TOPIC-1', self.__topic1s, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-TOPIC-1', self.__msrQueryTopic1s, self._insert_after_tags + ['TOPIC-1', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Topic1, 'TOPIC-1'), (MsrQueryTopic1, 'MSR-QUERY-TOPIC-1'), ), self._insert_after_tags + ['T', 'S'])
 
 class ChapterOrMsrQuery(ARObject):
     """
@@ -28083,22 +26625,20 @@ class ChapterOrMsrQuery(ARObject):
         super().__init__()
         self.tag = 'CHAPTER-OR-MSR-QUERY'
         self._node = etree.Element('CHAPTER-OR-MSR-QUERY')
-        self.__chapters = {}
-        self.__msrQueryChapters = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__chapters, '{*}CHAPTER', Chapter, file, 'chapters', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryChapters, '{*}MSR-QUERY-CHAPTER', MsrQueryChapter, file, 'msrQueryChapters', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'CHAPTER': ('Chapter', 'chapters'), 'MSR-QUERY-CHAPTER': ('MsrQueryChapter', 'msrQueryChapters')}, file, refCounter)
         return self
 
     def get_chapters(self) -> list[Chapter]:
-        return list(self.__chapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Chapter)]
 
     def __bind_chapter(self, value: Chapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__chapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Chapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Chapter or its sub-classes'.format(value))
@@ -28112,14 +26652,6 @@ class ChapterOrMsrQuery(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Chapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_chapter_at_index(self, index: int, value: Chapter) -> None:
-        """
-        Adds a single value to the chapters at the given index
-        """
-        if value is not None:
-            self.__bind_chapter(value)
-            AutosarNode._insert_at_index(self.__chapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_chapter(self, value: Chapter) -> None:
         """
@@ -28127,7 +26659,7 @@ class ChapterOrMsrQuery(ARObject):
         """
         if value is not None:
             self.__bind_chapter(value)
-            self.__chapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_chapters(self, values: list[Chapter]) -> None:
@@ -28157,10 +26689,10 @@ class ChapterOrMsrQuery(ARObject):
             self.remove_chapter(value)
 
     def get_msrQueryChapters(self) -> list[MsrQueryChapter]:
-        return list(self.__msrQueryChapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryChapter)]
 
     def __bind_msrQueryChapter(self, value: MsrQueryChapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryChapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryChapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryChapter or its sub-classes'.format(value))
@@ -28174,14 +26706,6 @@ class ChapterOrMsrQuery(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryChapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryChapter_at_index(self, index: int, value: MsrQueryChapter) -> None:
-        """
-        Adds a single value to the msrQueryChapters at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryChapter(value)
-            AutosarNode._insert_at_index(self.__msrQueryChapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryChapter(self, value: MsrQueryChapter) -> None:
         """
@@ -28189,7 +26713,7 @@ class ChapterOrMsrQuery(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryChapter(value)
-            self.__msrQueryChapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryChapters(self, values: list[MsrQueryChapter]) -> None:
@@ -28252,34 +26776,27 @@ class ChapterOrMsrQuery(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__chapters)
-        children.extend(self.__msrQueryChapters)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__chapters:
-            return 'chapters'
-        if child in self.__msrQueryChapters:
-            return 'msrQueryChapters'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'chapters':
-            self.__chapters[child] = None
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'chapters':
-            self.__chapters.pop(child, None)
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -28296,8 +26813,7 @@ class ChapterOrMsrQuery(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'CHAPTER', self.__chapters, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-CHAPTER', self.__msrQueryChapters, self._insert_after_tags + ['CHAPTER', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Chapter, 'CHAPTER'), (MsrQueryChapter, 'MSR-QUERY-CHAPTER'), ), self._insert_after_tags + ['T', 'S'])
 
 class PredefinedChapter(ARObject):
     """
@@ -28307,30 +26823,22 @@ class PredefinedChapter(ARObject):
         super().__init__()
         self.tag = 'PREDEFINED-CHAPTER'
         self._node = etree.Element('PREDEFINED-CHAPTER')
-        self.__prms = {}
+        self.__orderedMixedChildren = {}
         self.__topicContents = {}
-        self.__chapters = {}
-        self.__msrQueryChapters = {}
-        self.__msrQueryTopic1s = {}
-        self.__topic1s = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__prms, '{*}PRMS', Prms, file, 'prms', refCounter)
         refCounter = self._build_child_collection(self.__topicContents, '{*}TOPIC-CONTENT', TopicContentOrMsrQuery, file, 'topicContents', refCounter)
-        refCounter = self._build_child_collection(self.__chapters, '{*}CHAPTER', Chapter, file, 'chapters', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryChapters, '{*}MSR-QUERY-CHAPTER', MsrQueryChapter, file, 'msrQueryChapters', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryTopic1s, '{*}MSR-QUERY-TOPIC-1', MsrQueryTopic1, file, 'msrQueryTopic1s', refCounter)
-        refCounter = self._build_child_collection(self.__topic1s, '{*}TOPIC-1', Topic1, file, 'topic1s', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'PRMS': ('Prms', 'prms'), 'CHAPTER': ('Chapter', 'chapters'), 'MSR-QUERY-CHAPTER': ('MsrQueryChapter', 'msrQueryChapters'), 'MSR-QUERY-TOPIC-1': ('MsrQueryTopic1', 'msrQueryTopic1s'), 'TOPIC-1': ('Topic1', 'topic1s')}, file, refCounter)
         return self
 
     def get_prms(self) -> list[Prms]:
-        return list(self.__prms.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Prms)]
 
     def __bind_prm(self, value: Prms) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__prms.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Prms) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Prms or its sub-classes'.format(value))
@@ -28344,14 +26852,6 @@ class PredefinedChapter(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Prms_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_prm_at_index(self, index: int, value: Prms) -> None:
-        """
-        Adds a single value to the prms at the given index
-        """
-        if value is not None:
-            self.__bind_prm(value)
-            AutosarNode._insert_at_index(self.__prms, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_prm(self, value: Prms) -> None:
         """
@@ -28359,7 +26859,7 @@ class PredefinedChapter(ARObject):
         """
         if value is not None:
             self.__bind_prm(value)
-            self.__prms[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_prms(self, values: list[Prms]) -> None:
@@ -28451,10 +26951,10 @@ class PredefinedChapter(ARObject):
             self.remove_topicContent(value)
 
     def get_chapters(self) -> list[Chapter]:
-        return list(self.__chapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Chapter)]
 
     def __bind_chapter(self, value: Chapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__chapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Chapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Chapter or its sub-classes'.format(value))
@@ -28468,14 +26968,6 @@ class PredefinedChapter(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Chapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_chapter_at_index(self, index: int, value: Chapter) -> None:
-        """
-        Adds a single value to the chapters at the given index
-        """
-        if value is not None:
-            self.__bind_chapter(value)
-            AutosarNode._insert_at_index(self.__chapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_chapter(self, value: Chapter) -> None:
         """
@@ -28483,7 +26975,7 @@ class PredefinedChapter(ARObject):
         """
         if value is not None:
             self.__bind_chapter(value)
-            self.__chapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_chapters(self, values: list[Chapter]) -> None:
@@ -28513,10 +27005,10 @@ class PredefinedChapter(ARObject):
             self.remove_chapter(value)
 
     def get_msrQueryChapters(self) -> list[MsrQueryChapter]:
-        return list(self.__msrQueryChapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryChapter)]
 
     def __bind_msrQueryChapter(self, value: MsrQueryChapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryChapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryChapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryChapter or its sub-classes'.format(value))
@@ -28530,14 +27022,6 @@ class PredefinedChapter(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryChapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryChapter_at_index(self, index: int, value: MsrQueryChapter) -> None:
-        """
-        Adds a single value to the msrQueryChapters at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryChapter(value)
-            AutosarNode._insert_at_index(self.__msrQueryChapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryChapter(self, value: MsrQueryChapter) -> None:
         """
@@ -28545,7 +27029,7 @@ class PredefinedChapter(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryChapter(value)
-            self.__msrQueryChapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryChapters(self, values: list[MsrQueryChapter]) -> None:
@@ -28575,10 +27059,10 @@ class PredefinedChapter(ARObject):
             self.remove_msrQueryChapter(value)
 
     def get_msrQueryTopic1s(self) -> list[MsrQueryTopic1]:
-        return list(self.__msrQueryTopic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryTopic1)]
 
     def __bind_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryTopic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryTopic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryTopic1 or its sub-classes'.format(value))
@@ -28592,14 +27076,6 @@ class PredefinedChapter(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryTopic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryTopic1_at_index(self, index: int, value: MsrQueryTopic1) -> None:
-        """
-        Adds a single value to the msrQueryTopic1s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryTopic1(value)
-            AutosarNode._insert_at_index(self.__msrQueryTopic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
         """
@@ -28607,7 +27083,7 @@ class PredefinedChapter(ARObject):
         """
         if value is not None:
             self.__bind_msrQueryTopic1(value)
-            self.__msrQueryTopic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryTopic1s(self, values: list[MsrQueryTopic1]) -> None:
@@ -28637,10 +27113,10 @@ class PredefinedChapter(ARObject):
             self.remove_msrQueryTopic1(value)
 
     def get_topic1s(self) -> list[Topic1]:
-        return list(self.__topic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Topic1)]
 
     def __bind_topic1(self, value: Topic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__topic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Topic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Topic1 or its sub-classes'.format(value))
@@ -28654,14 +27130,6 @@ class PredefinedChapter(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Topic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_topic1_at_index(self, index: int, value: Topic1) -> None:
-        """
-        Adds a single value to the topic1s at the given index
-        """
-        if value is not None:
-            self.__bind_topic1(value)
-            AutosarNode._insert_at_index(self.__topic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_topic1(self, value: Topic1) -> None:
         """
@@ -28669,7 +27137,7 @@ class PredefinedChapter(ARObject):
         """
         if value is not None:
             self.__bind_topic1(value)
-            self.__topic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_topic1s(self, values: list[Topic1]) -> None:
@@ -28797,62 +27265,34 @@ class PredefinedChapter(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__prms)
         children.extend(self.__topicContents)
-        children.extend(self.__chapters)
-        children.extend(self.__msrQueryChapters)
-        children.extend(self.__msrQueryTopic1s)
-        children.extend(self.__topic1s)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__prms:
-            return 'prms'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if child in self.__topicContents:
             return 'topicContents'
-        if child in self.__chapters:
-            return 'chapters'
-        if child in self.__msrQueryChapters:
-            return 'msrQueryChapters'
-        if child in self.__msrQueryTopic1s:
-            return 'msrQueryTopic1s'
-        if child in self.__topic1s:
-            return 'topic1s'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'prms':
-            self.__prms[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'topicContents':
             self.__topicContents[child] = None
-        elif containment_slot == 'chapters':
-            self.__chapters[child] = None
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters[child] = None
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s[child] = None
-        elif containment_slot == 'topic1s':
-            self.__topic1s[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'prms':
-            self.__prms.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'topicContents':
             self.__topicContents.pop(child, None)
-        elif containment_slot == 'chapters':
-            self.__chapters.pop(child, None)
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters.pop(child, None)
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s.pop(child, None)
-        elif containment_slot == 'topic1s':
-            self.__topic1s.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -28871,13 +27311,9 @@ class PredefinedChapter(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'PRMS', self.__prms, self._insert_after_tags + ['T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Prms, 'PRMS'), (Chapter, 'CHAPTER'), (MsrQueryChapter, 'MSR-QUERY-CHAPTER'), (MsrQueryTopic1, 'MSR-QUERY-TOPIC-1'), (Topic1, 'TOPIC-1'), ), self._insert_after_tags + ['T', 'S'])
         for value in self.__topicContents:
             self._save_inline_child(value, self._insert_after_tags + ['PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'CHAPTER', self.__chapters, self._insert_after_tags + ['TOPIC-CONTENT', 'PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-CHAPTER', self.__msrQueryChapters, self._insert_after_tags + ['CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-TOPIC-1', self.__msrQueryTopic1s, self._insert_after_tags + ['MSR-QUERY-CHAPTER', 'CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'T', 'S'])
-        self._save_child_collection(None, 'TOPIC-1', self.__topic1s, self._insert_after_tags + ['MSR-QUERY-TOPIC-1', 'MSR-QUERY-CHAPTER', 'CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'T', 'S'])
 
 class Chapter(Identifiable,Paginateable):
     """
@@ -28888,12 +27324,8 @@ class Chapter(Identifiable,Paginateable):
         self.tag = 'CHAPTER'
         self._node = etree.Element('CHAPTER')
         self.__helpEntry = None
-        self.__prms = {}
+        self.__orderedMixedChildren = {}
         self.__topicContents = {}
-        self.__chapters = {}
-        self.__msrQueryChapters = {}
-        self.__msrQueryTopic1s = {}
-        self.__topic1s = {}
         self.__variationPoint = None
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
@@ -28901,13 +27333,9 @@ class Chapter(Identifiable,Paginateable):
         self.__helpEntry = self._read_xml_attribute('HELP-ENTRY', datatype_utils.get_string_value)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__prms, '{*}PRMS', Prms, file, 'prms', refCounter)
         refCounter = self._build_child_collection(self.__topicContents, '{*}TOPIC-CONTENT', TopicContentOrMsrQuery, file, 'topicContents', refCounter)
-        refCounter = self._build_child_collection(self.__chapters, '{*}CHAPTER', Chapter, file, 'chapters', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryChapters, '{*}MSR-QUERY-CHAPTER', MsrQueryChapter, file, 'msrQueryChapters', refCounter)
-        refCounter = self._build_child_collection(self.__msrQueryTopic1s, '{*}MSR-QUERY-TOPIC-1', MsrQueryTopic1, file, 'msrQueryTopic1s', refCounter)
-        refCounter = self._build_child_collection(self.__topic1s, '{*}TOPIC-1', Topic1, file, 'topic1s', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'PRMS': ('Prms', 'prms'), 'CHAPTER': ('Chapter', 'chapters'), 'MSR-QUERY-CHAPTER': ('MsrQueryChapter', 'msrQueryChapters'), 'MSR-QUERY-TOPIC-1': ('MsrQueryTopic1', 'msrQueryTopic1s'), 'TOPIC-1': ('Topic1', 'topic1s')}, file, refCounter)
         return self
 
     def get_helpEntry(self) -> str:
@@ -28918,10 +27346,10 @@ class Chapter(Identifiable,Paginateable):
         XDT.mark_attribute_dirty('helpEntry', self)
 
     def get_prms(self) -> list[Prms]:
-        return list(self.__prms.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Prms)]
 
     def __bind_prm(self, value: Prms) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__prms.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Prms) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Prms or its sub-classes'.format(value))
@@ -28935,14 +27363,6 @@ class Chapter(Identifiable,Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'Prms_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_prm_at_index(self, index: int, value: Prms) -> None:
-        """
-        Adds a single value to the prms at the given index
-        """
-        if value is not None:
-            self.__bind_prm(value)
-            AutosarNode._insert_at_index(self.__prms, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_prm(self, value: Prms) -> None:
         """
@@ -28950,7 +27370,7 @@ class Chapter(Identifiable,Paginateable):
         """
         if value is not None:
             self.__bind_prm(value)
-            self.__prms[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_prms(self, values: list[Prms]) -> None:
@@ -29042,10 +27462,10 @@ class Chapter(Identifiable,Paginateable):
             self.remove_topicContent(value)
 
     def get_chapters(self) -> list[Chapter]:
-        return list(self.__chapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Chapter)]
 
     def __bind_chapter(self, value: Chapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__chapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Chapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Chapter or its sub-classes'.format(value))
@@ -29059,14 +27479,6 @@ class Chapter(Identifiable,Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'Chapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_chapter_at_index(self, index: int, value: Chapter) -> None:
-        """
-        Adds a single value to the chapters at the given index
-        """
-        if value is not None:
-            self.__bind_chapter(value)
-            AutosarNode._insert_at_index(self.__chapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_chapter(self, value: Chapter) -> None:
         """
@@ -29074,7 +27486,7 @@ class Chapter(Identifiable,Paginateable):
         """
         if value is not None:
             self.__bind_chapter(value)
-            self.__chapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_chapters(self, values: list[Chapter]) -> None:
@@ -29104,10 +27516,10 @@ class Chapter(Identifiable,Paginateable):
             self.remove_chapter(value)
 
     def get_msrQueryChapters(self) -> list[MsrQueryChapter]:
-        return list(self.__msrQueryChapters.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryChapter)]
 
     def __bind_msrQueryChapter(self, value: MsrQueryChapter) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryChapters.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryChapter) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryChapter or its sub-classes'.format(value))
@@ -29121,14 +27533,6 @@ class Chapter(Identifiable,Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryChapter_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryChapter_at_index(self, index: int, value: MsrQueryChapter) -> None:
-        """
-        Adds a single value to the msrQueryChapters at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryChapter(value)
-            AutosarNode._insert_at_index(self.__msrQueryChapters, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryChapter(self, value: MsrQueryChapter) -> None:
         """
@@ -29136,7 +27540,7 @@ class Chapter(Identifiable,Paginateable):
         """
         if value is not None:
             self.__bind_msrQueryChapter(value)
-            self.__msrQueryChapters[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryChapters(self, values: list[MsrQueryChapter]) -> None:
@@ -29166,10 +27570,10 @@ class Chapter(Identifiable,Paginateable):
             self.remove_msrQueryChapter(value)
 
     def get_msrQueryTopic1s(self) -> list[MsrQueryTopic1]:
-        return list(self.__msrQueryTopic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, MsrQueryTopic1)]
 
     def __bind_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__msrQueryTopic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, MsrQueryTopic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of MsrQueryTopic1 or its sub-classes'.format(value))
@@ -29183,14 +27587,6 @@ class Chapter(Identifiable,Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'MsrQueryTopic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'timestamp', 'checksum'])
 
-    def add_msrQueryTopic1_at_index(self, index: int, value: MsrQueryTopic1) -> None:
-        """
-        Adds a single value to the msrQueryTopic1s at the given index
-        """
-        if value is not None:
-            self.__bind_msrQueryTopic1(value)
-            AutosarNode._insert_at_index(self.__msrQueryTopic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_msrQueryTopic1(self, value: MsrQueryTopic1) -> None:
         """
@@ -29198,7 +27594,7 @@ class Chapter(Identifiable,Paginateable):
         """
         if value is not None:
             self.__bind_msrQueryTopic1(value)
-            self.__msrQueryTopic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_msrQueryTopic1s(self, values: list[MsrQueryTopic1]) -> None:
@@ -29228,10 +27624,10 @@ class Chapter(Identifiable,Paginateable):
             self.remove_msrQueryTopic1(value)
 
     def get_topic1s(self) -> list[Topic1]:
-        return list(self.__topic1s.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Topic1)]
 
     def __bind_topic1(self, value: Topic1) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__topic1s.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Topic1) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Topic1 or its sub-classes'.format(value))
@@ -29245,14 +27641,6 @@ class Chapter(Identifiable,Paginateable):
             value._build_path(elementNameIfShortNameMissing = 'Topic1_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['keepWithPrevious', 'break', 'view', 'si', 'uuid', 'category', 'shortName', 'timestamp', 'checksum'])
 
-    def add_topic1_at_index(self, index: int, value: Topic1) -> None:
-        """
-        Adds a single value to the topic1s at the given index
-        """
-        if value is not None:
-            self.__bind_topic1(value)
-            AutosarNode._insert_at_index(self.__topic1s, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_topic1(self, value: Topic1) -> None:
         """
@@ -29260,7 +27648,7 @@ class Chapter(Identifiable,Paginateable):
         """
         if value is not None:
             self.__bind_topic1(value)
-            self.__topic1s[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_topic1s(self, values: list[Topic1]) -> None:
@@ -29429,29 +27817,17 @@ class Chapter(Identifiable,Paginateable):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__prms)
         children.extend(self.__topicContents)
-        children.extend(self.__chapters)
-        children.extend(self.__msrQueryChapters)
-        children.extend(self.__msrQueryTopic1s)
-        children.extend(self.__topic1s)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__prms:
-            return 'prms'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if child in self.__topicContents:
             return 'topicContents'
-        if child in self.__chapters:
-            return 'chapters'
-        if child in self.__msrQueryChapters:
-            return 'msrQueryChapters'
-        if child in self.__msrQueryTopic1s:
-            return 'msrQueryTopic1s'
-        if child in self.__topic1s:
-            return 'topic1s'
         if self.__variationPoint is child:
             return 'variationPoint'
         return super()._containment_slot_of(child)
@@ -29459,18 +27835,10 @@ class Chapter(Identifiable,Paginateable):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'prms':
-            self.__prms[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         elif containment_slot == 'topicContents':
             self.__topicContents[child] = None
-        elif containment_slot == 'chapters':
-            self.__chapters[child] = None
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters[child] = None
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s[child] = None
-        elif containment_slot == 'topic1s':
-            self.__topic1s[child] = None
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is None:
                 self.__variationPoint = child
@@ -29480,18 +27848,10 @@ class Chapter(Identifiable,Paginateable):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'prms':
-            self.__prms.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         elif containment_slot == 'topicContents':
             self.__topicContents.pop(child, None)
-        elif containment_slot == 'chapters':
-            self.__chapters.pop(child, None)
-        elif containment_slot == 'msrQueryChapters':
-            self.__msrQueryChapters.pop(child, None)
-        elif containment_slot == 'msrQueryTopic1s':
-            self.__msrQueryTopic1s.pop(child, None)
-        elif containment_slot == 'topic1s':
-            self.__topic1s.pop(child, None)
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is child:
                 self.__variationPoint = None
@@ -29517,13 +27877,9 @@ class Chapter(Identifiable,Paginateable):
             return
         super()._save_Identifiable()
         super()._save_Paginateable()
-        self._save_child_collection(None, 'PRMS', self.__prms, self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Prms, 'PRMS'), (Chapter, 'CHAPTER'), (MsrQueryChapter, 'MSR-QUERY-CHAPTER'), (MsrQueryTopic1, 'MSR-QUERY-TOPIC-1'), (Topic1, 'TOPIC-1'), ), self._insert_after_tags + ['KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
         for value in self.__topicContents:
             self._save_inline_child(value, self._insert_after_tags + ['PRMS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'CHAPTER', self.__chapters, self._insert_after_tags + ['TOPIC-CONTENT', 'PRMS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-CHAPTER', self.__msrQueryChapters, self._insert_after_tags + ['CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'MSR-QUERY-TOPIC-1', self.__msrQueryTopic1s, self._insert_after_tags + ['MSR-QUERY-CHAPTER', 'CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
-        self._save_child_collection(None, 'TOPIC-1', self.__topic1s, self._insert_after_tags + ['MSR-QUERY-TOPIC-1', 'MSR-QUERY-CHAPTER', 'CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
         self._save_xml_attribute('HELP-ENTRY', 'helpEntry', str(self.__helpEntry) if self.__helpEntry is not None else None)
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['TOPIC-1', 'MSR-QUERY-TOPIC-1', 'MSR-QUERY-CHAPTER', 'CHAPTER', 'TOPIC-CONTENT', 'PRMS', 'KEEP-WITH-PREVIOUS', 'BREAK', 'VIEW', 'SI', 'UUID', 'ANNOTATIONS', 'INTRODUCTION', 'ADMIN-DATA', 'CATEGORY', 'DESC', 'LONG-NAME', 'SHORT-NAME-FRAGMENTS', 'SHORT-NAME', 'T', 'S'])
 
@@ -46251,20 +44607,14 @@ class SdgContents(ARObject):
         super().__init__()
         self.tag = 'SDG-CONTENTS'
         self._node = etree.Element('SDG-CONTENTS')
+        self.__orderedMixedChildren = {}
         self.__sdxs = {}
-        self.__sdxfs = {}
-        self.__sds = {}
-        self.__sdgs = {}
-        self.__sdfs = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__sdxfs, '{*}SDXF', ReferrableRefConditional, file, 'sdxfs', refCounter)
-        refCounter = self._build_child_collection(self.__sds, '{*}SD', Sd, file, 'sds', refCounter)
-        refCounter = self._build_child_collection(self.__sdgs, '{*}SDG', Sdg, file, 'sdgs', refCounter)
-        refCounter = self._build_child_collection(self.__sdfs, '{*}SDF', Sdf, file, 'sdfs', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'SDXF': ('ReferrableRefConditional', 'sdxfs'), 'SD': ('Sd', 'sds'), 'SDG': ('Sdg', 'sdgs'), 'SDF': ('Sdf', 'sdfs')}, file, refCounter)
         return self
 
     def _resolve_references(self):
@@ -46317,10 +44667,10 @@ class SdgContents(ARObject):
             self.remove_sdx(value)
 
     def get_sdxfs(self) -> list[ReferrableRefConditional]:
-        return list(self.__sdxfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, ReferrableRefConditional)]
 
     def __bind_sdxf(self, value: ReferrableRefConditional) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sdxfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, ReferrableRefConditional) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of ReferrableRefConditional or its sub-classes'.format(value))
@@ -46334,14 +44684,6 @@ class SdgContents(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'ReferrableRefConditional_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sdxf_at_index(self, index: int, value: ReferrableRefConditional) -> None:
-        """
-        Adds a single value to the sdxfs at the given index
-        """
-        if value is not None:
-            self.__bind_sdxf(value)
-            AutosarNode._insert_at_index(self.__sdxfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sdxf(self, value: ReferrableRefConditional) -> None:
         """
@@ -46349,7 +44691,7 @@ class SdgContents(ARObject):
         """
         if value is not None:
             self.__bind_sdxf(value)
-            self.__sdxfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sdxfs(self, values: list[ReferrableRefConditional]) -> None:
@@ -46379,10 +44721,10 @@ class SdgContents(ARObject):
             self.remove_sdxf(value)
 
     def get_sds(self) -> list[Sd]:
-        return list(self.__sds.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Sd)]
 
     def __bind_sd(self, value: Sd) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sds.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Sd) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Sd or its sub-classes'.format(value))
@@ -46396,14 +44738,6 @@ class SdgContents(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Sd_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sd_at_index(self, index: int, value: Sd) -> None:
-        """
-        Adds a single value to the sds at the given index
-        """
-        if value is not None:
-            self.__bind_sd(value)
-            AutosarNode._insert_at_index(self.__sds, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sd(self, value: Sd) -> None:
         """
@@ -46411,7 +44745,7 @@ class SdgContents(ARObject):
         """
         if value is not None:
             self.__bind_sd(value)
-            self.__sds[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sds(self, values: list[Sd]) -> None:
@@ -46441,10 +44775,10 @@ class SdgContents(ARObject):
             self.remove_sd(value)
 
     def get_sdgs(self) -> list[Sdg]:
-        return list(self.__sdgs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Sdg)]
 
     def __bind_sdg(self, value: Sdg) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sdgs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Sdg) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Sdg or its sub-classes'.format(value))
@@ -46458,14 +44792,6 @@ class SdgContents(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Sdg_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sdg_at_index(self, index: int, value: Sdg) -> None:
-        """
-        Adds a single value to the sdgs at the given index
-        """
-        if value is not None:
-            self.__bind_sdg(value)
-            AutosarNode._insert_at_index(self.__sdgs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sdg(self, value: Sdg) -> None:
         """
@@ -46473,7 +44799,7 @@ class SdgContents(ARObject):
         """
         if value is not None:
             self.__bind_sdg(value)
-            self.__sdgs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sdgs(self, values: list[Sdg]) -> None:
@@ -46503,10 +44829,10 @@ class SdgContents(ARObject):
             self.remove_sdg(value)
 
     def get_sdfs(self) -> list[Sdf]:
-        return list(self.__sdfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Sdf)]
 
     def __bind_sdf(self, value: Sdf) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sdfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Sdf) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Sdf or its sub-classes'.format(value))
@@ -46520,14 +44846,6 @@ class SdgContents(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Sdf_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sdf_at_index(self, index: int, value: Sdf) -> None:
-        """
-        Adds a single value to the sdfs at the given index
-        """
-        if value is not None:
-            self.__bind_sdf(value)
-            AutosarNode._insert_at_index(self.__sdfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sdf(self, value: Sdf) -> None:
         """
@@ -46535,7 +44853,7 @@ class SdgContents(ARObject):
         """
         if value is not None:
             self.__bind_sdf(value)
-            self.__sdfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sdfs(self, values: list[Sdf]) -> None:
@@ -46630,48 +44948,27 @@ class SdgContents(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__sdxfs)
-        children.extend(self.__sds)
-        children.extend(self.__sdgs)
-        children.extend(self.__sdfs)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__sdxfs:
-            return 'sdxfs'
-        if child in self.__sds:
-            return 'sds'
-        if child in self.__sdgs:
-            return 'sdgs'
-        if child in self.__sdfs:
-            return 'sdfs'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'sdxfs':
-            self.__sdxfs[child] = None
-        elif containment_slot == 'sds':
-            self.__sds[child] = None
-        elif containment_slot == 'sdgs':
-            self.__sdgs[child] = None
-        elif containment_slot == 'sdfs':
-            self.__sdfs[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'sdxfs':
-            self.__sdxfs.pop(child, None)
-        elif containment_slot == 'sds':
-            self.__sds.pop(child, None)
-        elif containment_slot == 'sdgs':
-            self.__sdgs.pop(child, None)
-        elif containment_slot == 'sdfs':
-            self.__sdfs.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -46690,10 +44987,7 @@ class SdgContents(ARObject):
             return
         super()._save_ARObject()
         self._save_reference_list(None, 'SDX-REF', self.__sdxs, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'SDXF', self.__sdxfs, self._insert_after_tags + ['SDX-REF', 'T', 'S'])
-        self._save_child_collection(None, 'SD', self.__sds, self._insert_after_tags + ['SDXF', 'SDX-REF', 'T', 'S'])
-        self._save_child_collection(None, 'SDG', self.__sdgs, self._insert_after_tags + ['SD', 'SDXF', 'SDX-REF', 'T', 'S'])
-        self._save_child_collection(None, 'SDF', self.__sdfs, self._insert_after_tags + ['SDG', 'SD', 'SDXF', 'SDX-REF', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((ReferrableRefConditional, 'SDXF'), (Sd, 'SD'), (Sdg, 'SDG'), (Sdf, 'SDF'), ), self._insert_after_tags + ['SDX-REF', 'T', 'S'])
 
 class Sdg(ARObject):
     """
@@ -46704,13 +44998,10 @@ class Sdg(ARObject):
         self.tag = 'SDG'
         self._node = etree.Element('SDG')
         self.__gid = None
+        self.__orderedMixedChildren = {}
         self.__sdgCaption = None
         self.__sdgCaptionRef = None
-        self.__sds = {}
-        self.__sdfs = {}
-        self.__sdgs = {}
         self.__sdxs = {}
-        self.__sdxfs = {}
         self.__variationPoint = None
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
@@ -46719,11 +45010,8 @@ class Sdg(ARObject):
 
         refCounter = 0
         self.__sdgCaption = self._build_single_child('{*}SDG-CAPTION', SdgCaption, file, 'sdgCaption')
-        refCounter = self._build_child_collection(self.__sds, '{*}SD', Sd, file, 'sds', refCounter)
-        refCounter = self._build_child_collection(self.__sdfs, '{*}SDF', Sdf, file, 'sdfs', refCounter)
-        refCounter = self._build_child_collection(self.__sdgs, '{*}SDG', Sdg, file, 'sdgs', refCounter)
-        refCounter = self._build_child_collection(self.__sdxfs, '{*}SDXF', ReferrableRefConditional, file, 'sdxfs', refCounter)
         self.__variationPoint = self._build_single_child('{*}VARIATION-POINT', VariationPoint, file, 'variationPoint')
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'SD': ('Sd', 'sds'), 'SDF': ('Sdf', 'sdfs'), 'SDG': ('Sdg', 'sdgs'), 'SDXF': ('ReferrableRefConditional', 'sdxfs')}, file, refCounter)
         return self
 
     def _resolve_references(self):
@@ -46784,10 +45072,10 @@ class Sdg(ARObject):
         XDT.mark_dirty(self.__sdgCaptionRef, self)
 
     def get_sds(self) -> list[Sd]:
-        return list(self.__sds.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Sd)]
 
     def __bind_sd(self, value: Sd) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sds.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Sd) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Sd or its sub-classes'.format(value))
@@ -46801,14 +45089,6 @@ class Sdg(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Sd_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sd_at_index(self, index: int, value: Sd) -> None:
-        """
-        Adds a single value to the sds at the given index
-        """
-        if value is not None:
-            self.__bind_sd(value)
-            AutosarNode._insert_at_index(self.__sds, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sd(self, value: Sd) -> None:
         """
@@ -46816,7 +45096,7 @@ class Sdg(ARObject):
         """
         if value is not None:
             self.__bind_sd(value)
-            self.__sds[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sds(self, values: list[Sd]) -> None:
@@ -46846,10 +45126,10 @@ class Sdg(ARObject):
             self.remove_sd(value)
 
     def get_sdfs(self) -> list[Sdf]:
-        return list(self.__sdfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Sdf)]
 
     def __bind_sdf(self, value: Sdf) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sdfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Sdf) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Sdf or its sub-classes'.format(value))
@@ -46863,14 +45143,6 @@ class Sdg(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Sdf_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sdf_at_index(self, index: int, value: Sdf) -> None:
-        """
-        Adds a single value to the sdfs at the given index
-        """
-        if value is not None:
-            self.__bind_sdf(value)
-            AutosarNode._insert_at_index(self.__sdfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sdf(self, value: Sdf) -> None:
         """
@@ -46878,7 +45150,7 @@ class Sdg(ARObject):
         """
         if value is not None:
             self.__bind_sdf(value)
-            self.__sdfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sdfs(self, values: list[Sdf]) -> None:
@@ -46908,10 +45180,10 @@ class Sdg(ARObject):
             self.remove_sdf(value)
 
     def get_sdgs(self) -> list[Sdg]:
-        return list(self.__sdgs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, Sdg)]
 
     def __bind_sdg(self, value: Sdg) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sdgs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, Sdg) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of Sdg or its sub-classes'.format(value))
@@ -46925,14 +45197,6 @@ class Sdg(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'Sdg_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sdg_at_index(self, index: int, value: Sdg) -> None:
-        """
-        Adds a single value to the sdgs at the given index
-        """
-        if value is not None:
-            self.__bind_sdg(value)
-            AutosarNode._insert_at_index(self.__sdgs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sdg(self, value: Sdg) -> None:
         """
@@ -46940,7 +45204,7 @@ class Sdg(ARObject):
         """
         if value is not None:
             self.__bind_sdg(value)
-            self.__sdgs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sdgs(self, values: list[Sdg]) -> None:
@@ -47015,10 +45279,10 @@ class Sdg(ARObject):
             self.remove_sdx(value)
 
     def get_sdxfs(self) -> list[ReferrableRefConditional]:
-        return list(self.__sdxfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, ReferrableRefConditional)]
 
     def __bind_sdxf(self, value: ReferrableRefConditional) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__sdxfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, ReferrableRefConditional) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of ReferrableRefConditional or its sub-classes'.format(value))
@@ -47032,14 +45296,6 @@ class Sdg(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'ReferrableRefConditional_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_sdxf_at_index(self, index: int, value: ReferrableRefConditional) -> None:
-        """
-        Adds a single value to the sdxfs at the given index
-        """
-        if value is not None:
-            self.__bind_sdxf(value)
-            AutosarNode._insert_at_index(self.__sdxfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_sdxf(self, value: ReferrableRefConditional) -> None:
         """
@@ -47047,7 +45303,7 @@ class Sdg(ARObject):
         """
         if value is not None:
             self.__bind_sdxf(value)
-            self.__sdxfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_sdxfs(self, values: list[ReferrableRefConditional]) -> None:
@@ -47201,25 +45457,16 @@ class Sdg(ARObject):
         children = super().get_children()
         if self.__sdgCaption is not None:
             children.append(self.__sdgCaption)
-        children.extend(self.__sds)
-        children.extend(self.__sdfs)
-        children.extend(self.__sdgs)
-        children.extend(self.__sdxfs)
         if self.__variationPoint is not None:
             children.append(self.__variationPoint)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__sdgCaption is child:
             return 'sdgCaption'
-        if child in self.__sds:
-            return 'sds'
-        if child in self.__sdfs:
-            return 'sdfs'
-        if child in self.__sdgs:
-            return 'sdgs'
-        if child in self.__sdxfs:
-            return 'sdxfs'
         if self.__variationPoint is child:
             return 'variationPoint'
         return super()._containment_slot_of(child)
@@ -47227,17 +45474,11 @@ class Sdg(ARObject):
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'sdgCaption':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
+        elif containment_slot == 'sdgCaption':
             if self.__sdgCaption is None:
                 self.__sdgCaption = child
-        elif containment_slot == 'sds':
-            self.__sds[child] = None
-        elif containment_slot == 'sdfs':
-            self.__sdfs[child] = None
-        elif containment_slot == 'sdgs':
-            self.__sdgs[child] = None
-        elif containment_slot == 'sdxfs':
-            self.__sdxfs[child] = None
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is None:
                 self.__variationPoint = child
@@ -47247,17 +45488,11 @@ class Sdg(ARObject):
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'sdgCaption':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
+        elif containment_slot == 'sdgCaption':
             if self.__sdgCaption is child:
                 self.__sdgCaption = None
-        elif containment_slot == 'sds':
-            self.__sds.pop(child, None)
-        elif containment_slot == 'sdfs':
-            self.__sdfs.pop(child, None)
-        elif containment_slot == 'sdgs':
-            self.__sdgs.pop(child, None)
-        elif containment_slot == 'sdxfs':
-            self.__sdxfs.pop(child, None)
         elif containment_slot == 'variationPoint':
             if self.__variationPoint is child:
                 self.__variationPoint = None
@@ -47285,11 +45520,8 @@ class Sdg(ARObject):
         self._save_xml_attribute('GID', 'gid', str(self.__gid) if self.__gid is not None else None)
         self._save_single_child('SDG-CAPTION', self.__sdgCaption, self._insert_after_tags + ['T', 'S'])
         self._save_single_reference('SDG-CAPTION-REF', self.__sdgCaptionRef, self._insert_after_tags + ['SDG-CAPTION', 'T', 'S'])
-        self._save_child_collection(None, 'SD', self.__sds, self._insert_after_tags + ['SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
-        self._save_child_collection(None, 'SDF', self.__sdfs, self._insert_after_tags + ['SD', 'SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
-        self._save_child_collection(None, 'SDG', self.__sdgs, self._insert_after_tags + ['SDF', 'SD', 'SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((Sd, 'SD'), (Sdf, 'SDF'), (Sdg, 'SDG'), (ReferrableRefConditional, 'SDXF'), ), self._insert_after_tags + ['SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
         self._save_reference_list(None, 'SDX-REF', self.__sdxs, self._insert_after_tags + ['SDG', 'SDF', 'SD', 'SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
-        self._save_child_collection(None, 'SDXF', self.__sdxfs, self._insert_after_tags + ['SDX-REF', 'SDG', 'SDF', 'SD', 'SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
         self._save_single_child('VARIATION-POINT', self.__variationPoint, self._insert_after_tags + ['SDXF', 'SDX-REF', 'SDG', 'SDF', 'SD', 'SDG-CAPTION-REF', 'SDG-CAPTION', 'T', 'S'])
 
 class DocRevision(ARObject):
@@ -49839,14 +48071,14 @@ class ValueList(ARObject):
         self.tag = 'VALUE-LIST'
         self._node = etree.Element('VALUE-LIST')
         self.__vs = None
-        self.__vfs = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
         self.__vs = self._read_scalar_element('V', datatype_utils.get_string_value)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__vfs, '{*}VF', NumericalValueVariationPoint, file, 'vfs', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'VF': ('NumericalValueVariationPoint', 'vfs')}, file, refCounter)
         return self
 
     def get_vs(self) -> str:
@@ -49857,10 +48089,10 @@ class ValueList(ARObject):
         XDT.mark_attribute_dirty('vs', self)
 
     def get_vfs(self) -> list[NumericalValueVariationPoint]:
-        return list(self.__vfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalValueVariationPoint)]
 
     def __bind_vf(self, value: NumericalValueVariationPoint) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalValueVariationPoint) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalValueVariationPoint or its sub-classes'.format(value))
@@ -49874,14 +48106,6 @@ class ValueList(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalValueVariationPoint_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['shortLabel', 'sd', 'blueprintValue', 'bindingTime', 'timestamp', 'checksum'])
 
-    def add_vf_at_index(self, index: int, value: NumericalValueVariationPoint) -> None:
-        """
-        Adds a single value to the vfs at the given index
-        """
-        if value is not None:
-            self.__bind_vf(value)
-            AutosarNode._insert_at_index(self.__vfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vf(self, value: NumericalValueVariationPoint) -> None:
         """
@@ -49889,7 +48113,7 @@ class ValueList(ARObject):
         """
         if value is not None:
             self.__bind_vf(value)
-            self.__vfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vfs(self, values: list[NumericalValueVariationPoint]) -> None:
@@ -49936,27 +48160,27 @@ class ValueList(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__vfs)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__vfs:
-            return 'vfs'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'vfs':
-            self.__vfs[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'vfs':
-            self.__vfs.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -49974,7 +48198,7 @@ class ValueList(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'VF', self.__vfs, self._insert_after_tags + ['T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((NumericalValueVariationPoint, 'VF'), ), self._insert_after_tags + ['T', 'S'])
         self._save_scalar_element('V', 'vs', str(self.__vs) if self.__vs is not None else None, create_after_nodes = ['VF', 'T', 'S'] + self._insert_after_tags)
 
 class SwBitRepresentation(ARObject):
@@ -70333,9 +68557,7 @@ class RuleArguments(ARObject):
         self._node = etree.Element('RULE-ARGUMENTS')
         self.__vs = None
         self.__vts = None
-        self.__vfs = {}
-        self.__vtfs = {}
-        self.__variationPoints = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
@@ -70343,9 +68565,7 @@ class RuleArguments(ARObject):
         self.__vts = self._read_scalar_element('VT', datatype_utils.get_string_value)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__vfs, '{*}VF', NumericalValueVariationPoint, file, 'vfs', refCounter)
-        refCounter = self._build_child_collection(self.__vtfs, '{*}VTF', NumericalOrText, file, 'vtfs', refCounter)
-        refCounter = self._build_child_collection(self.__variationPoints, '{*}VARIATION-POINT', VariationPoint, file, 'variationPoints', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'VF': ('NumericalValueVariationPoint', 'vfs'), 'VTF': ('NumericalOrText', 'vtfs'), 'VARIATION-POINT': ('VariationPoint', 'variationPoints')}, file, refCounter)
         return self
 
     def get_vs(self) -> str:
@@ -70363,10 +68583,10 @@ class RuleArguments(ARObject):
         XDT.mark_attribute_dirty('vts', self)
 
     def get_vfs(self) -> list[NumericalValueVariationPoint]:
-        return list(self.__vfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalValueVariationPoint)]
 
     def __bind_vf(self, value: NumericalValueVariationPoint) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalValueVariationPoint) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalValueVariationPoint or its sub-classes'.format(value))
@@ -70380,14 +68600,6 @@ class RuleArguments(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalValueVariationPoint_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['shortLabel', 'sd', 'blueprintValue', 'bindingTime', 'timestamp', 'checksum'])
 
-    def add_vf_at_index(self, index: int, value: NumericalValueVariationPoint) -> None:
-        """
-        Adds a single value to the vfs at the given index
-        """
-        if value is not None:
-            self.__bind_vf(value)
-            AutosarNode._insert_at_index(self.__vfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vf(self, value: NumericalValueVariationPoint) -> None:
         """
@@ -70395,7 +68607,7 @@ class RuleArguments(ARObject):
         """
         if value is not None:
             self.__bind_vf(value)
-            self.__vfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vfs(self, values: list[NumericalValueVariationPoint]) -> None:
@@ -70425,10 +68637,10 @@ class RuleArguments(ARObject):
             self.remove_vf(value)
 
     def get_vtfs(self) -> list[NumericalOrText]:
-        return list(self.__vtfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalOrText)]
 
     def __bind_vtf(self, value: NumericalOrText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vtfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalOrText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalOrText or its sub-classes'.format(value))
@@ -70442,14 +68654,6 @@ class RuleArguments(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalOrText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_vtf_at_index(self, index: int, value: NumericalOrText) -> None:
-        """
-        Adds a single value to the vtfs at the given index
-        """
-        if value is not None:
-            self.__bind_vtf(value)
-            AutosarNode._insert_at_index(self.__vtfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vtf(self, value: NumericalOrText) -> None:
         """
@@ -70457,7 +68661,7 @@ class RuleArguments(ARObject):
         """
         if value is not None:
             self.__bind_vtf(value)
-            self.__vtfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vtfs(self, values: list[NumericalOrText]) -> None:
@@ -70487,10 +68691,10 @@ class RuleArguments(ARObject):
             self.remove_vtf(value)
 
     def get_variationPoints(self) -> list[VariationPoint]:
-        return list(self.__variationPoints.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, VariationPoint)]
 
     def __bind_variationPoint(self, value: VariationPoint) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__variationPoints.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, VariationPoint) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of VariationPoint or its sub-classes'.format(value))
@@ -70504,14 +68708,6 @@ class RuleArguments(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'VariationPoint_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_variationPoint_at_index(self, index: int, value: VariationPoint) -> None:
-        """
-        Adds a single value to the variationPoints at the given index
-        """
-        if value is not None:
-            self.__bind_variationPoint(value)
-            AutosarNode._insert_at_index(self.__variationPoints, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_variationPoint(self, value: VariationPoint) -> None:
         """
@@ -70519,7 +68715,7 @@ class RuleArguments(ARObject):
         """
         if value is not None:
             self.__bind_variationPoint(value)
-            self.__variationPoints[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_variationPoints(self, values: list[VariationPoint]) -> None:
@@ -70598,41 +68794,27 @@ class RuleArguments(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__vfs)
-        children.extend(self.__vtfs)
-        children.extend(self.__variationPoints)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__vfs:
-            return 'vfs'
-        if child in self.__vtfs:
-            return 'vtfs'
-        if child in self.__variationPoints:
-            return 'variationPoints'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'vfs':
-            self.__vfs[child] = None
-        elif containment_slot == 'vtfs':
-            self.__vtfs[child] = None
-        elif containment_slot == 'variationPoints':
-            self.__variationPoints[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'vfs':
-            self.__vfs.pop(child, None)
-        elif containment_slot == 'vtfs':
-            self.__vtfs.pop(child, None)
-        elif containment_slot == 'variationPoints':
-            self.__variationPoints.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -70654,10 +68836,8 @@ class RuleArguments(ARObject):
             return
         super()._save_ARObject()
         self._save_scalar_element('V', 'vs', str(self.__vs) if self.__vs is not None else None, create_after_nodes = ['T', 'S'] + self._insert_after_tags)
-        self._save_child_collection(None, 'VF', self.__vfs, self._insert_after_tags + ['V', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((NumericalValueVariationPoint, 'VF'), (NumericalOrText, 'VTF'), (VariationPoint, 'VARIATION-POINT'), ), self._insert_after_tags + ['V', 'T', 'S'])
         self._save_scalar_element('VT', 'vts', str(self.__vts) if self.__vts is not None else None, create_after_nodes = ['VF', 'V', 'T', 'S'] + self._insert_after_tags)
-        self._save_child_collection(None, 'VTF', self.__vtfs, self._insert_after_tags + ['VT', 'VF', 'V', 'T', 'S'])
-        self._save_child_collection(None, 'VARIATION-POINT', self.__variationPoints, self._insert_after_tags + ['VTF', 'VT', 'VF', 'V', 'T', 'S'])
 
 class NumericalOrText(ARObject):
     """
@@ -73327,9 +71507,7 @@ class SwValues(ARObject):
         self._node = etree.Element('SW-VALUES')
         self.__vts = None
         self.__vs = None
-        self.__vtfs = {}
-        self.__vfs = {}
-        self.__vgs = {}
+        self.__orderedMixedChildren = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
@@ -73337,9 +71515,7 @@ class SwValues(ARObject):
         self.__vs = self._read_scalar_element('V', datatype_utils.get_string_value)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__vtfs, '{*}VTF', NumericalOrText, file, 'vtfs', refCounter)
-        refCounter = self._build_child_collection(self.__vfs, '{*}VF', NumericalValueVariationPoint, file, 'vfs', refCounter)
-        refCounter = self._build_child_collection(self.__vgs, '{*}VG', ValueGroup, file, 'vgs', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'VTF': ('NumericalOrText', 'vtfs'), 'VF': ('NumericalValueVariationPoint', 'vfs'), 'VG': ('ValueGroup', 'vgs')}, file, refCounter)
         return self
 
     def get_vts(self) -> str:
@@ -73357,10 +71533,10 @@ class SwValues(ARObject):
         XDT.mark_attribute_dirty('vs', self)
 
     def get_vtfs(self) -> list[NumericalOrText]:
-        return list(self.__vtfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalOrText)]
 
     def __bind_vtf(self, value: NumericalOrText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vtfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalOrText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalOrText or its sub-classes'.format(value))
@@ -73374,14 +71550,6 @@ class SwValues(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalOrText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_vtf_at_index(self, index: int, value: NumericalOrText) -> None:
-        """
-        Adds a single value to the vtfs at the given index
-        """
-        if value is not None:
-            self.__bind_vtf(value)
-            AutosarNode._insert_at_index(self.__vtfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vtf(self, value: NumericalOrText) -> None:
         """
@@ -73389,7 +71557,7 @@ class SwValues(ARObject):
         """
         if value is not None:
             self.__bind_vtf(value)
-            self.__vtfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vtfs(self, values: list[NumericalOrText]) -> None:
@@ -73419,10 +71587,10 @@ class SwValues(ARObject):
             self.remove_vtf(value)
 
     def get_vfs(self) -> list[NumericalValueVariationPoint]:
-        return list(self.__vfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalValueVariationPoint)]
 
     def __bind_vf(self, value: NumericalValueVariationPoint) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalValueVariationPoint) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalValueVariationPoint or its sub-classes'.format(value))
@@ -73436,14 +71604,6 @@ class SwValues(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalValueVariationPoint_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['shortLabel', 'sd', 'blueprintValue', 'bindingTime', 'timestamp', 'checksum'])
 
-    def add_vf_at_index(self, index: int, value: NumericalValueVariationPoint) -> None:
-        """
-        Adds a single value to the vfs at the given index
-        """
-        if value is not None:
-            self.__bind_vf(value)
-            AutosarNode._insert_at_index(self.__vfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vf(self, value: NumericalValueVariationPoint) -> None:
         """
@@ -73451,7 +71611,7 @@ class SwValues(ARObject):
         """
         if value is not None:
             self.__bind_vf(value)
-            self.__vfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vfs(self, values: list[NumericalValueVariationPoint]) -> None:
@@ -73481,10 +71641,10 @@ class SwValues(ARObject):
             self.remove_vf(value)
 
     def get_vgs(self) -> list[ValueGroup]:
-        return list(self.__vgs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, ValueGroup)]
 
     def __bind_vg(self, value: ValueGroup) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vgs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, ValueGroup) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of ValueGroup or its sub-classes'.format(value))
@@ -73498,14 +71658,6 @@ class SwValues(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'ValueGroup_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_vg_at_index(self, index: int, value: ValueGroup) -> None:
-        """
-        Adds a single value to the vgs at the given index
-        """
-        if value is not None:
-            self.__bind_vg(value)
-            AutosarNode._insert_at_index(self.__vgs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vg(self, value: ValueGroup) -> None:
         """
@@ -73513,7 +71665,7 @@ class SwValues(ARObject):
         """
         if value is not None:
             self.__bind_vg(value)
-            self.__vgs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vgs(self, values: list[ValueGroup]) -> None:
@@ -73592,41 +71744,27 @@ class SwValues(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__vtfs)
-        children.extend(self.__vfs)
-        children.extend(self.__vgs)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__vtfs:
-            return 'vtfs'
-        if child in self.__vfs:
-            return 'vfs'
-        if child in self.__vgs:
-            return 'vgs'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'vtfs':
-            self.__vtfs[child] = None
-        elif containment_slot == 'vfs':
-            self.__vfs[child] = None
-        elif containment_slot == 'vgs':
-            self.__vgs[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'vtfs':
-            self.__vtfs.pop(child, None)
-        elif containment_slot == 'vfs':
-            self.__vfs.pop(child, None)
-        elif containment_slot == 'vgs':
-            self.__vgs.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -73645,11 +71783,9 @@ class SwValues(ARObject):
         if XDT.is_dirty(self) is False:
             return
         super()._save_ARObject()
-        self._save_child_collection(None, 'VTF', self.__vtfs, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'VF', self.__vfs, self._insert_after_tags + ['VTF', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((NumericalOrText, 'VTF'), (NumericalValueVariationPoint, 'VF'), (ValueGroup, 'VG'), ), self._insert_after_tags + ['T', 'S'])
         self._save_scalar_element('VT', 'vts', str(self.__vts) if self.__vts is not None else None, create_after_nodes = ['VF', 'VTF', 'T', 'S'] + self._insert_after_tags)
         self._save_scalar_element('V', 'vs', str(self.__vs) if self.__vs is not None else None, create_after_nodes = ['VT', 'VF', 'VTF', 'T', 'S'] + self._insert_after_tags)
-        self._save_child_collection(None, 'VG', self.__vgs, self._insert_after_tags + ['V', 'VT', 'VF', 'VTF', 'T', 'S'])
 
 class ValueGroup(ARObject):
     """
@@ -73659,19 +71795,15 @@ class ValueGroup(ARObject):
         super().__init__()
         self.tag = 'VALUE-GROUP'
         self._node = etree.Element('VALUE-GROUP')
+        self.__orderedMixedChildren = {}
         self.__label = None
-        self.__vfs = {}
-        self.__vgs = {}
-        self.__vtfs = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
         self.__label = self._build_single_child('{*}LABEL', MultilanguageLongName, file, 'label')
-        refCounter = self._build_child_collection(self.__vfs, '{*}VF', NumericalValueVariationPoint, file, 'vfs', refCounter)
-        refCounter = self._build_child_collection(self.__vgs, '{*}VG', ValueGroup, file, 'vgs', refCounter)
-        refCounter = self._build_child_collection(self.__vtfs, '{*}VTF', NumericalOrText, file, 'vtfs', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'VF': ('NumericalValueVariationPoint', 'vfs'), 'VG': ('ValueGroup', 'vgs'), 'VTF': ('NumericalOrText', 'vtfs')}, file, refCounter)
         return self
 
     def get_label(self) -> MultilanguageLongName:
@@ -73700,10 +71832,10 @@ class ValueGroup(ARObject):
         XDT.mark_dirty(self.__label, self)
 
     def get_vfs(self) -> list[NumericalValueVariationPoint]:
-        return list(self.__vfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalValueVariationPoint)]
 
     def __bind_vf(self, value: NumericalValueVariationPoint) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalValueVariationPoint) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalValueVariationPoint or its sub-classes'.format(value))
@@ -73717,14 +71849,6 @@ class ValueGroup(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalValueVariationPoint_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['shortLabel', 'sd', 'blueprintValue', 'bindingTime', 'timestamp', 'checksum'])
 
-    def add_vf_at_index(self, index: int, value: NumericalValueVariationPoint) -> None:
-        """
-        Adds a single value to the vfs at the given index
-        """
-        if value is not None:
-            self.__bind_vf(value)
-            AutosarNode._insert_at_index(self.__vfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vf(self, value: NumericalValueVariationPoint) -> None:
         """
@@ -73732,7 +71856,7 @@ class ValueGroup(ARObject):
         """
         if value is not None:
             self.__bind_vf(value)
-            self.__vfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vfs(self, values: list[NumericalValueVariationPoint]) -> None:
@@ -73762,10 +71886,10 @@ class ValueGroup(ARObject):
             self.remove_vf(value)
 
     def get_vgs(self) -> list[ValueGroup]:
-        return list(self.__vgs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, ValueGroup)]
 
     def __bind_vg(self, value: ValueGroup) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vgs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, ValueGroup) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of ValueGroup or its sub-classes'.format(value))
@@ -73779,14 +71903,6 @@ class ValueGroup(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'ValueGroup_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_vg_at_index(self, index: int, value: ValueGroup) -> None:
-        """
-        Adds a single value to the vgs at the given index
-        """
-        if value is not None:
-            self.__bind_vg(value)
-            AutosarNode._insert_at_index(self.__vgs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vg(self, value: ValueGroup) -> None:
         """
@@ -73794,7 +71910,7 @@ class ValueGroup(ARObject):
         """
         if value is not None:
             self.__bind_vg(value)
-            self.__vgs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vgs(self, values: list[ValueGroup]) -> None:
@@ -73824,10 +71940,10 @@ class ValueGroup(ARObject):
             self.remove_vg(value)
 
     def get_vtfs(self) -> list[NumericalOrText]:
-        return list(self.__vtfs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, NumericalOrText)]
 
     def __bind_vtf(self, value: NumericalOrText) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__vtfs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, NumericalOrText) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of NumericalOrText or its sub-classes'.format(value))
@@ -73841,14 +71957,6 @@ class ValueGroup(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'NumericalOrText_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_vtf_at_index(self, index: int, value: NumericalOrText) -> None:
-        """
-        Adds a single value to the vtfs at the given index
-        """
-        if value is not None:
-            self.__bind_vtf(value)
-            AutosarNode._insert_at_index(self.__vtfs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_vtf(self, value: NumericalOrText) -> None:
         """
@@ -73856,7 +71964,7 @@ class ValueGroup(ARObject):
         """
         if value is not None:
             self.__bind_vtf(value)
-            self.__vtfs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_vtfs(self, values: list[NumericalOrText]) -> None:
@@ -73953,49 +72061,35 @@ class ValueGroup(ARObject):
         children = super().get_children()
         if self.__label is not None:
             children.append(self.__label)
-        children.extend(self.__vfs)
-        children.extend(self.__vgs)
-        children.extend(self.__vtfs)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__label is child:
             return 'label'
-        if child in self.__vfs:
-            return 'vfs'
-        if child in self.__vgs:
-            return 'vgs'
-        if child in self.__vtfs:
-            return 'vtfs'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'label':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
+        elif containment_slot == 'label':
             if self.__label is None:
                 self.__label = child
-        elif containment_slot == 'vfs':
-            self.__vfs[child] = None
-        elif containment_slot == 'vgs':
-            self.__vgs[child] = None
-        elif containment_slot == 'vtfs':
-            self.__vtfs[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'label':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
+        elif containment_slot == 'label':
             if self.__label is child:
                 self.__label = None
-        elif containment_slot == 'vfs':
-            self.__vfs.pop(child, None)
-        elif containment_slot == 'vgs':
-            self.__vgs.pop(child, None)
-        elif containment_slot == 'vtfs':
-            self.__vtfs.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -74013,9 +72107,7 @@ class ValueGroup(ARObject):
             return
         super()._save_ARObject()
         self._save_single_child('LABEL', self.__label, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'VF', self.__vfs, self._insert_after_tags + ['LABEL', 'T', 'S'])
-        self._save_child_collection(None, 'VG', self.__vgs, self._insert_after_tags + ['VF', 'LABEL', 'T', 'S'])
-        self._save_child_collection(None, 'VTF', self.__vtfs, self._insert_after_tags + ['VG', 'VF', 'LABEL', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((NumericalValueVariationPoint, 'VF'), (ValueGroup, 'VG'), (NumericalOrText, 'VTF'), ), self._insert_after_tags + ['LABEL', 'T', 'S'])
 
 class SwValueCont(ARObject):
     """
@@ -107910,11 +106002,10 @@ class SwRecordLayoutGroup(ARObject):
         self.__swRecordLayoutGroupTo = None
         self.__swRecordLayoutGroupStep = None
         self.__swRecordLayoutComponent = None
+        self.__orderedMixedChildren = {}
         self.__desc = None
         self.__swGenericAxisParamType = None
         self.__swRecordLayouts = {}
-        self.__swRecordLayoutGroups = {}
-        self.__swRecordLayoutVs = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
@@ -107929,8 +106020,7 @@ class SwRecordLayoutGroup(ARObject):
 
         refCounter = 0
         self.__desc = self._build_single_child('{*}DESC', MultiLanguageOverviewParagraph, file, 'desc')
-        refCounter = self._build_child_collection(self.__swRecordLayoutGroups, '{*}SW-RECORD-LAYOUT-GROUP', SwRecordLayoutGroup, file, 'swRecordLayoutGroups', refCounter)
-        refCounter = self._build_child_collection(self.__swRecordLayoutVs, '{*}SW-RECORD-LAYOUT-V', SwRecordLayoutV, file, 'swRecordLayoutVs', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'SW-RECORD-LAYOUT-GROUP': ('SwRecordLayoutGroup', 'swRecordLayoutGroups'), 'SW-RECORD-LAYOUT-V': ('SwRecordLayoutV', 'swRecordLayoutVs')}, file, refCounter)
         return self
 
     def _resolve_references(self):
@@ -108085,10 +106175,10 @@ class SwRecordLayoutGroup(ARObject):
             self.remove_swRecordLayout(value)
 
     def get_swRecordLayoutGroups(self) -> list[SwRecordLayoutGroup]:
-        return list(self.__swRecordLayoutGroups.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, SwRecordLayoutGroup)]
 
     def __bind_swRecordLayoutGroup(self, value: SwRecordLayoutGroup) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__swRecordLayoutGroups.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, SwRecordLayoutGroup) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of SwRecordLayoutGroup or its sub-classes'.format(value))
@@ -108102,14 +106192,6 @@ class SwRecordLayoutGroup(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'SwRecordLayoutGroup_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_swRecordLayoutGroup_at_index(self, index: int, value: SwRecordLayoutGroup) -> None:
-        """
-        Adds a single value to the swRecordLayoutGroups at the given index
-        """
-        if value is not None:
-            self.__bind_swRecordLayoutGroup(value)
-            AutosarNode._insert_at_index(self.__swRecordLayoutGroups, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_swRecordLayoutGroup(self, value: SwRecordLayoutGroup) -> None:
         """
@@ -108117,7 +106199,7 @@ class SwRecordLayoutGroup(ARObject):
         """
         if value is not None:
             self.__bind_swRecordLayoutGroup(value)
-            self.__swRecordLayoutGroups[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_swRecordLayoutGroups(self, values: list[SwRecordLayoutGroup]) -> None:
@@ -108147,10 +106229,10 @@ class SwRecordLayoutGroup(ARObject):
             self.remove_swRecordLayoutGroup(value)
 
     def get_swRecordLayoutVs(self) -> list[SwRecordLayoutV]:
-        return list(self.__swRecordLayoutVs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, SwRecordLayoutV)]
 
     def __bind_swRecordLayoutV(self, value: SwRecordLayoutV) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__swRecordLayoutVs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, SwRecordLayoutV) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of SwRecordLayoutV or its sub-classes'.format(value))
@@ -108164,14 +106246,6 @@ class SwRecordLayoutGroup(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'SwRecordLayoutV_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_swRecordLayoutV_at_index(self, index: int, value: SwRecordLayoutV) -> None:
-        """
-        Adds a single value to the swRecordLayoutVs at the given index
-        """
-        if value is not None:
-            self.__bind_swRecordLayoutV(value)
-            AutosarNode._insert_at_index(self.__swRecordLayoutVs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_swRecordLayoutV(self, value: SwRecordLayoutV) -> None:
         """
@@ -108179,7 +106253,7 @@ class SwRecordLayoutGroup(ARObject):
         """
         if value is not None:
             self.__bind_swRecordLayoutV(value)
-            self.__swRecordLayoutVs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_swRecordLayoutVs(self, values: list[SwRecordLayoutV]) -> None:
@@ -108260,42 +106334,35 @@ class SwRecordLayoutGroup(ARObject):
         children = super().get_children()
         if self.__desc is not None:
             children.append(self.__desc)
-        children.extend(self.__swRecordLayoutGroups)
-        children.extend(self.__swRecordLayoutVs)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         if self.__desc is child:
             return 'desc'
-        if child in self.__swRecordLayoutGroups:
-            return 'swRecordLayoutGroups'
-        if child in self.__swRecordLayoutVs:
-            return 'swRecordLayoutVs'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'desc':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
+        elif containment_slot == 'desc':
             if self.__desc is None:
                 self.__desc = child
-        elif containment_slot == 'swRecordLayoutGroups':
-            self.__swRecordLayoutGroups[child] = None
-        elif containment_slot == 'swRecordLayoutVs':
-            self.__swRecordLayoutVs[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'desc':
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
+        elif containment_slot == 'desc':
             if self.__desc is child:
                 self.__desc = None
-        elif containment_slot == 'swRecordLayoutGroups':
-            self.__swRecordLayoutGroups.pop(child, None)
-        elif containment_slot == 'swRecordLayoutVs':
-            self.__swRecordLayoutVs.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -108333,8 +106400,7 @@ class SwRecordLayoutGroup(ARObject):
         self._save_scalar_element('SW-RECORD-LAYOUT-GROUP-STEP', 'swRecordLayoutGroupStep', str(self.__swRecordLayoutGroupStep) if self.__swRecordLayoutGroupStep is not None else None, create_after_nodes = ['SW-RECORD-LAYOUT-GROUP-TO', 'SW-RECORD-LAYOUT-GROUP-FROM', 'SW-GENERIC-AXIS-PARAM-TYPE-REF', 'SW-RECORD-LAYOUT-GROUP-INDEX', 'SW-RECORD-LAYOUT-GROUP-AXIS', 'DESC', 'CATEGORY', 'SHORT-LABEL', 'T', 'S'] + self._insert_after_tags)
         self._save_scalar_element('SW-RECORD-LAYOUT-COMPONENT', 'swRecordLayoutComponent', str(self.__swRecordLayoutComponent) if self.__swRecordLayoutComponent is not None else None, create_after_nodes = ['SW-RECORD-LAYOUT-GROUP-STEP', 'SW-RECORD-LAYOUT-GROUP-TO', 'SW-RECORD-LAYOUT-GROUP-FROM', 'SW-GENERIC-AXIS-PARAM-TYPE-REF', 'SW-RECORD-LAYOUT-GROUP-INDEX', 'SW-RECORD-LAYOUT-GROUP-AXIS', 'DESC', 'CATEGORY', 'SHORT-LABEL', 'T', 'S'] + self._insert_after_tags)
         self._save_reference_list(None, 'SW-RECORD-LAYOUT-REF', self.__swRecordLayouts, self._insert_after_tags + ['SW-RECORD-LAYOUT-COMPONENT', 'SW-RECORD-LAYOUT-GROUP-STEP', 'SW-RECORD-LAYOUT-GROUP-TO', 'SW-RECORD-LAYOUT-GROUP-FROM', 'SW-GENERIC-AXIS-PARAM-TYPE-REF', 'SW-RECORD-LAYOUT-GROUP-INDEX', 'SW-RECORD-LAYOUT-GROUP-AXIS', 'DESC', 'CATEGORY', 'SHORT-LABEL', 'T', 'S'])
-        self._save_child_collection(None, 'SW-RECORD-LAYOUT-GROUP', self.__swRecordLayoutGroups, self._insert_after_tags + ['SW-RECORD-LAYOUT-REF', 'SW-RECORD-LAYOUT-COMPONENT', 'SW-RECORD-LAYOUT-GROUP-STEP', 'SW-RECORD-LAYOUT-GROUP-TO', 'SW-RECORD-LAYOUT-GROUP-FROM', 'SW-GENERIC-AXIS-PARAM-TYPE-REF', 'SW-RECORD-LAYOUT-GROUP-INDEX', 'SW-RECORD-LAYOUT-GROUP-AXIS', 'DESC', 'CATEGORY', 'SHORT-LABEL', 'T', 'S'])
-        self._save_child_collection(None, 'SW-RECORD-LAYOUT-V', self.__swRecordLayoutVs, self._insert_after_tags + ['SW-RECORD-LAYOUT-GROUP', 'SW-RECORD-LAYOUT-REF', 'SW-RECORD-LAYOUT-COMPONENT', 'SW-RECORD-LAYOUT-GROUP-STEP', 'SW-RECORD-LAYOUT-GROUP-TO', 'SW-RECORD-LAYOUT-GROUP-FROM', 'SW-GENERIC-AXIS-PARAM-TYPE-REF', 'SW-RECORD-LAYOUT-GROUP-INDEX', 'SW-RECORD-LAYOUT-GROUP-AXIS', 'DESC', 'CATEGORY', 'SHORT-LABEL', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((SwRecordLayoutGroup, 'SW-RECORD-LAYOUT-GROUP'), (SwRecordLayoutV, 'SW-RECORD-LAYOUT-V'), ), self._insert_after_tags + ['SW-RECORD-LAYOUT-REF', 'SW-RECORD-LAYOUT-COMPONENT', 'SW-RECORD-LAYOUT-GROUP-STEP', 'SW-RECORD-LAYOUT-GROUP-TO', 'SW-RECORD-LAYOUT-GROUP-FROM', 'SW-GENERIC-AXIS-PARAM-TYPE-REF', 'SW-RECORD-LAYOUT-GROUP-INDEX', 'SW-RECORD-LAYOUT-GROUP-AXIS', 'DESC', 'CATEGORY', 'SHORT-LABEL', 'T', 'S'])
 
 class SwRecordLayoutGroupContent(ARObject):
     """
@@ -108344,16 +106410,14 @@ class SwRecordLayoutGroupContent(ARObject):
         super().__init__()
         self.tag = 'SW-RECORD-LAYOUT-GROUP-CONTENT'
         self._node = etree.Element('SW-RECORD-LAYOUT-GROUP-CONTENT')
+        self.__orderedMixedChildren = {}
         self.__swRecordLayouts = {}
-        self.__swRecordLayoutVs = {}
-        self.__swRecordLayoutGroups = {}
 
     def _build(self, parent, node, file, elementNameIfShortNameMissing = None):
         super()._build(parent, node, file, elementNameIfShortNameMissing)
 
         refCounter = 0
-        refCounter = self._build_child_collection(self.__swRecordLayoutVs, '{*}SW-RECORD-LAYOUT-V', SwRecordLayoutV, file, 'swRecordLayoutVs', refCounter)
-        refCounter = self._build_child_collection(self.__swRecordLayoutGroups, '{*}SW-RECORD-LAYOUT-GROUP', SwRecordLayoutGroup, file, 'swRecordLayoutGroups', refCounter)
+        refCounter = self._build_ordered_children(self.__orderedMixedChildren, {'SW-RECORD-LAYOUT-V': ('SwRecordLayoutV', 'swRecordLayoutVs'), 'SW-RECORD-LAYOUT-GROUP': ('SwRecordLayoutGroup', 'swRecordLayoutGroups')}, file, refCounter)
         return self
 
     def _resolve_references(self):
@@ -108406,10 +106470,10 @@ class SwRecordLayoutGroupContent(ARObject):
             self.remove_swRecordLayout(value)
 
     def get_swRecordLayoutVs(self) -> list[SwRecordLayoutV]:
-        return list(self.__swRecordLayoutVs.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, SwRecordLayoutV)]
 
     def __bind_swRecordLayoutV(self, value: SwRecordLayoutV) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__swRecordLayoutVs.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, SwRecordLayoutV) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of SwRecordLayoutV or its sub-classes'.format(value))
@@ -108423,14 +106487,6 @@ class SwRecordLayoutGroupContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'SwRecordLayoutV_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_swRecordLayoutV_at_index(self, index: int, value: SwRecordLayoutV) -> None:
-        """
-        Adds a single value to the swRecordLayoutVs at the given index
-        """
-        if value is not None:
-            self.__bind_swRecordLayoutV(value)
-            AutosarNode._insert_at_index(self.__swRecordLayoutVs, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_swRecordLayoutV(self, value: SwRecordLayoutV) -> None:
         """
@@ -108438,7 +106494,7 @@ class SwRecordLayoutGroupContent(ARObject):
         """
         if value is not None:
             self.__bind_swRecordLayoutV(value)
-            self.__swRecordLayoutVs[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_swRecordLayoutVs(self, values: list[SwRecordLayoutV]) -> None:
@@ -108468,10 +106524,10 @@ class SwRecordLayoutGroupContent(ARObject):
             self.remove_swRecordLayoutV(value)
 
     def get_swRecordLayoutGroups(self) -> list[SwRecordLayoutGroup]:
-        return list(self.__swRecordLayoutGroups.keys())
+        return [v for v in self.__orderedMixedChildren if isinstance(v, SwRecordLayoutGroup)]
 
     def __bind_swRecordLayoutGroup(self, value: SwRecordLayoutGroup) -> None:
-        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__swRecordLayoutGroups.keys()):
+        if isinstance(value, Referrable) and any(v.name == value.name for v in self.__orderedMixedChildren.keys()):
             raise InvalidRefOrChildNodeException('Operation not possible. A node with name {} already present in {}.'.format(value.name, self))
         if isinstance(value, SwRecordLayoutGroup) is False:
             raise InvalidRefOrChildNodeException('Operation not possible. {} should be an instance of SwRecordLayoutGroup or its sub-classes'.format(value))
@@ -108485,14 +106541,6 @@ class SwRecordLayoutGroupContent(ARObject):
             value._build_path(elementNameIfShortNameMissing = 'SwRecordLayoutGroup_@' + str(len(self.get_children()))) #updates the path
         XDT.mark_dirty(value, self, attributesToMakeDirty = ['timestamp', 'checksum'])
 
-    def add_swRecordLayoutGroup_at_index(self, index: int, value: SwRecordLayoutGroup) -> None:
-        """
-        Adds a single value to the swRecordLayoutGroups at the given index
-        """
-        if value is not None:
-            self.__bind_swRecordLayoutGroup(value)
-            AutosarNode._insert_at_index(self.__swRecordLayoutGroups, value, index)
-            self._sync_add_to_merge_target(value)
 
     def add_swRecordLayoutGroup(self, value: SwRecordLayoutGroup) -> None:
         """
@@ -108500,7 +106548,7 @@ class SwRecordLayoutGroupContent(ARObject):
         """
         if value is not None:
             self.__bind_swRecordLayoutGroup(value)
-            self.__swRecordLayoutGroups[value] = None
+            self.__orderedMixedChildren[value] = None
             self._sync_add_to_merge_target(value)
 
     def set_swRecordLayoutGroups(self, values: list[SwRecordLayoutGroup]) -> None:
@@ -108563,34 +106611,27 @@ class SwRecordLayoutGroupContent(ARObject):
 
     def get_children(self) -> list[AutosarNode]:
         children = super().get_children()
-        children.extend(self.__swRecordLayoutVs)
-        children.extend(self.__swRecordLayoutGroups)
+        children.extend(self.__orderedMixedChildren)
         return children
 
     def _containment_slot_of(self, child: AutosarNode) -> str | None:
-        if child in self.__swRecordLayoutVs:
-            return 'swRecordLayoutVs'
-        if child in self.__swRecordLayoutGroups:
-            return 'swRecordLayoutGroups'
+        if child in self.__orderedMixedChildren:
+            return 'orderedMixedChildren'
         return super()._containment_slot_of(child)
 
     def add_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'swRecordLayoutVs':
-            self.__swRecordLayoutVs[child] = None
-        elif containment_slot == 'swRecordLayoutGroups':
-            self.__swRecordLayoutGroups[child] = None
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren[child] = None
         else:
             super().add_child(child, containment_slot)
 
     def remove_child(self, child: AutosarNode, containment_slot: str) -> None:
         if child is None:
             return
-        if containment_slot == 'swRecordLayoutVs':
-            self.__swRecordLayoutVs.pop(child, None)
-        elif containment_slot == 'swRecordLayoutGroups':
-            self.__swRecordLayoutGroups.pop(child, None)
+        if containment_slot == 'orderedMixedChildren':
+            self.__orderedMixedChildren.pop(child, None)
         else:
             super().remove_child(child, containment_slot)
 
@@ -108609,8 +106650,7 @@ class SwRecordLayoutGroupContent(ARObject):
             return
         super()._save_ARObject()
         self._save_reference_list(None, 'SW-RECORD-LAYOUT-REF', self.__swRecordLayouts, self._insert_after_tags + ['T', 'S'])
-        self._save_child_collection(None, 'SW-RECORD-LAYOUT-V', self.__swRecordLayoutVs, self._insert_after_tags + ['SW-RECORD-LAYOUT-REF', 'T', 'S'])
-        self._save_child_collection(None, 'SW-RECORD-LAYOUT-GROUP', self.__swRecordLayoutGroups, self._insert_after_tags + ['SW-RECORD-LAYOUT-V', 'SW-RECORD-LAYOUT-REF', 'T', 'S'])
+        self._save_ordered_children(self.__orderedMixedChildren, ((SwRecordLayoutV, 'SW-RECORD-LAYOUT-V'), (SwRecordLayoutGroup, 'SW-RECORD-LAYOUT-GROUP'), ), self._insert_after_tags + ['SW-RECORD-LAYOUT-REF', 'T', 'S'])
 
 class SwRecordLayoutV(ARObject):
     """
@@ -345986,8 +344026,8 @@ class RptPreparationEnum(Enum):
     Determines the RP preparation level for access to VariableDataPrototypes within the generated RTE implementation.
     """
     VALUE_NONE = ('NONE') #No RP preparation for VariableDataPrototype.
-    VALUE_RPT_LEVEL_1 = ('RPT-LEVEL-1') #The RTE implementation uses an „RP global buffer" for measurement and post-build hooking purposes.
-    VALUE_RPT_LEVEL_2 = ('RPT-LEVEL-2') #As rpLevel1 but the RTE implementation also uses both „RP enabler flag" to permit RP overwrite at run-time.
+    VALUE_RPT_LEVEL_1 = ('RPT-LEVEL-1') #The RTE implementation uses an â€žRP global buffer" for measurement and post-build hooking purposes.
+    VALUE_RPT_LEVEL_2 = ('RPT-LEVEL-2') #As rpLevel1 but the RTE implementation also uses both â€žRP enabler flag" to permit RP overwrite at run-time.
     VALUE_RPT_LEVEL_3 = ('RPT-LEVEL-3') #As rpLevel2 but the RTE implementation also uses "RP global measurement buffer" to record the original ECU-generated value in addition to the RP value.
 
     def __init__(self, literal):

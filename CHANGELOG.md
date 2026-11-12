@@ -81,3 +81,6 @@ Added MCP server for autosarfactory
   - New property `contributing_files` and new api `get_fragment_files()` tell which files contribute to a model element.
   - The api `get_fragment(file)` returns the part of the element which lives in the given file. Elements created or removed through it are saved to that file.
 - Added class `UnresolvedRef` for reference nodes which cannot be resolved to a target. Use the api `is_proxy()` to know if a node is a real object or a proxy (an instance of `UnresolvedRef`). Unresolved references are no longer lost when the file is saved.
+
+## [0.8.1]() - 2026-11-12
+- Fixed the issues with the generation of ordered choice elements. For eg: the Introduction can have an unbounded elements of type paragraph, items, list etc etc in any order and the generator respects the order in which they are added.
