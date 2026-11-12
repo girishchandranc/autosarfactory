@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The introduction of an element is a documentation block. The schema allows its children (P, LIST, VERBATIM, ...)
+  in any order, and the order is meaningful. The introductions below have different orders:
+    Cont:           P, LIST, P
+    ParamMixed:     P, P, LIST (unnumbered), a comment, LIST (numbered), P, P   (a LOWER-MULTIPLICITY follows it)
+    ParamListFirst: LIST, P, LIST, P
+    ParamVerbatim:  P, VERBATIM, P, LIST, VERBATIM
+    ParamNested:    LIST of two items: the first item holds P, LIST, P and the second one P
+    ParamEmpty:     no introduction
+-->
+<AUTOSAR xmlns="http://autosar.org/schema/r4.0">
+  <AR-PACKAGES>
+    <AR-PACKAGE>
+      <SHORT-NAME>Defs</SHORT-NAME>
+      <ELEMENTS>
+        <ECUC-MODULE-DEF>
+          <SHORT-NAME>Mod</SHORT-NAME>
+          <CONTAINERS>
+            <ECUC-PARAM-CONF-CONTAINER-DEF>
+              <SHORT-NAME>Cont</SHORT-NAME>
+              <INTRODUCTION>
+                <P><L-1 L="EN">Container lead-in</L-1></P>
+                <LIST TYPE="UNNUMBER">
+                  <ITEM><P><L-1 L="EN">item</L-1></P></ITEM>
+                </LIST>
+                <P><L-1 L="EN">After the list</L-1></P>
+              </INTRODUCTION>
+              <PARAMETERS>
+                <ECUC-INTEGER-PARAM-DEF>
+                  <SHORT-NAME>ParamMixed</SHORT-NAME>
+                  <INTRODUCTION>
+                    <P><L-1 L="EN">P1</L-1></P>
+                    <P><L-1 L="EN">P2</L-1></P>
+                    <LIST TYPE="UNNUMBER">
+                      <ITEM><P><L-1 L="EN">a</L-1></P></ITEM>
+                      <ITEM><P><L-1 L="EN">b</L-1></P></ITEM>
+                    </LIST>
+                    <!-- a comment between the children -->
+                    <LIST TYPE="NUMBER">
+                      <ITEM><P><L-1 L="EN">one</L-1></P></ITEM>
+                    </LIST>
+                    <P><L-1 L="EN">P3</L-1></P>
+                    <P><L-1 L="EN">P4</L-1></P>
+                  </INTRODUCTION>
+                  <LOWER-MULTIPLICITY>0</LOWER-MULTIPLICITY>
+                </ECUC-INTEGER-PARAM-DEF>
+                <ECUC-INTEGER-PARAM-DEF>
+                  <SHORT-NAME>ParamListFirst</SHORT-NAME>
+                  <INTRODUCTION>
+                    <LIST TYPE="UNNUMBER">
+                      <ITEM><P><L-1 L="EN">x</L-1></P></ITEM>
+                    </LIST>
+                    <P><L-1 L="EN">Text</L-1></P>
+                    <LIST TYPE="NUMBER">
+                      <ITEM><P><L-1 L="EN">y</L-1></P></ITEM>
+                    </LIST>
+                    <P><L-1 L="EN">Tail</L-1></P>
+                  </INTRODUCTION>
+                </ECUC-INTEGER-PARAM-DEF>
+                <ECUC-BOOLEAN-PARAM-DEF>
+                  <SHORT-NAME>ParamVerbatim</SHORT-NAME>
+                  <INTRODUCTION>
+                    <P><L-1 L="EN">Intro</L-1></P>
+                    <VERBATIM><L-5 L="EN">code</L-5></VERBATIM>
+                    <P><L-1 L="EN">Between</L-1></P>
+                    <LIST TYPE="UNNUMBER">
+                      <ITEM><P><L-1 L="EN">x</L-1></P></ITEM>
+                    </LIST>
+                    <VERBATIM><L-5 L="EN">more code</L-5></VERBATIM>
+                  </INTRODUCTION>
+                </ECUC-BOOLEAN-PARAM-DEF>
+                <ECUC-INTEGER-PARAM-DEF>
+                  <SHORT-NAME>ParamNested</SHORT-NAME>
+                  <INTRODUCTION>
+                    <LIST TYPE="UNNUMBER">
+                      <ITEM>
+                        <P><L-1 L="EN">first</L-1></P>
+                        <LIST TYPE="UNNUMBER">
+                          <ITEM><P><L-1 L="EN">sub</L-1></P></ITEM>
+                        </LIST>
+                        <P><L-1 L="EN">after sub</L-1></P>
+                      </ITEM>
+                      <ITEM>
+                        <P><L-1 L="EN">second</L-1></P>
+                      </ITEM>
+                    </LIST>
+                  </INTRODUCTION>
+                </ECUC-INTEGER-PARAM-DEF>
+                <ECUC-INTEGER-PARAM-DEF>
+                  <SHORT-NAME>ParamEmpty</SHORT-NAME>
+                </ECUC-INTEGER-PARAM-DEF>
+              </PARAMETERS>
+            </ECUC-PARAM-CONF-CONTAINER-DEF>
+          </CONTAINERS>
+        </ECUC-MODULE-DEF>
+      </ELEMENTS>
+    </AR-PACKAGE>
+  </AR-PACKAGES>
+</AUTOSAR>

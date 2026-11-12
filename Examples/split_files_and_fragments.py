@@ -10,7 +10,6 @@ from autosarfactory import autosarfactory
 def short(path):
     return os.path.basename(path)
 
-
 def ports_per_file(files):
     """
     Reads every file on its own and returns {file name: [port names of /Swcs/asw1]}, to see what is really saved.
@@ -20,7 +19,6 @@ def ports_per_file(files):
         autosarfactory.reinit()
         autosarfactory.read([file])
         result[short(file)] = sorted(p.name for p in autosarfactory.get_node('/Swcs/asw1').get_ports())
-    autosarfactory.reinit()
     return result
 
 
